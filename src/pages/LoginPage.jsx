@@ -13,12 +13,23 @@ export default function LoginPage() {
     e.preventDefault();
     setError('');
     setBusy(true);
+    // Show "waking up" hint after 5s (Render free tier cold start)
+    const slowTimer = setTimeout(() => {
+      setBusy('slow');
+    }, 5000);
     try {
       const user = await login(form.email, form.password);
       nav(user.role === 'ADMIN' ? '/admin' : '/dashboard');
     } catch (err) {
-      setError(err.response?.data?.error || 'Login failed. Please try again.');
-    } finally { setBusy(false); }
+      if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
+        setError('Server is waking up — please try again in a few seconds.');
+      } else {
+        setError(err.response?.data?.error || 'Login failed. Please try again.');
+      }
+    } finally {
+      clearTimeout(slowTimer);
+      setBusy(false);
+    }
   }
 
   return (
@@ -192,7 +203,7 @@ export default function LoginPage() {
                   letterSpacing: 0.5,
                 }}
               >
-                {busy ? '⏳ Logging in...' : '🐸 Let\'s Go!'}
+                {busy === 'slow' ? '⏳ Waking server up…' : busy ? '⏳ Logging in...' : '🐸 Let\'s Go!'}
               </button>
             </form>
 

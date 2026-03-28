@@ -4,7 +4,7 @@ import axios from 'axios';
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5000/api',
-  timeout: 15000,
+  timeout: 60000,  // 60s — Render free tier cold start can take 30-50s
 });
 
 // Attach token on every request
@@ -14,13 +14,17 @@ api.interceptors.request.use(config => {
   return config;
 });
 
-// Global 401 handler — kick to login
+// Global 401 handler — only redirect on /auth/me (session expired), not on other endpoints
 api.interceptors.response.use(
   res => res,
   err => {
     if (err.response?.status === 401) {
-      localStorage.removeItem('cq_token');
-      window.location.href = '/login';
+      const url = err.config?.url || '';
+      // Only force-redirect when the session check itself fails (expired token)
+      if (url.includes('/auth/me')) {
+        localStorage.removeItem('cq_token');
+        window.location.href = '/login';
+      }
     }
     return Promise.reject(err);
   }
