@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { GoogleLogin } from '@react-oauth/google';
 
 export default function LoginPage() {
-  const { login } = useAuth();
+  const { login, googleLogin } = useAuth();
   const nav = useNavigate();
   const [form,  setForm]  = useState({ email: '', password: '' });
   const [error, setError] = useState('');
@@ -211,6 +212,33 @@ export default function LoginPage() {
               <Link to="/forgot-password" style={{ color: '#FF6B35', fontWeight: 700, fontSize: 13, textDecoration: 'none' }}>
                 Forgot password?
               </Link>
+            </div>
+
+            {/* Google Sign-In */}
+            <div style={{ marginTop: 20 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+                <div style={{ flex: 1, height: 1, background: '#F0E4DC' }} />
+                <span style={{ color: '#8A7060', fontSize: 12, fontWeight: 700 }}>OR</span>
+                <div style={{ flex: 1, height: 1, background: '#F0E4DC' }} />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'center' }}>
+                <GoogleLogin
+                  onSuccess={async ({ credential }) => {
+                    try {
+                      const user = await googleLogin(credential);
+                      if (user.role === 'ADMIN') nav('/admin');
+                      else if (user.isNew) nav('/onboarding');
+                      else nav('/dashboard');
+                    } catch (e) {
+                      setError(e.response?.data?.error || 'Google sign-in failed');
+                    }
+                  }}
+                  onError={() => setError('Google sign-in failed')}
+                  useOneTap
+                  shape="pill"
+                  text="signin_with"
+                />
+              </div>
             </div>
 
             <div style={{

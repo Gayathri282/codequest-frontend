@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { GoogleLogin } from '@react-oauth/google';
 
 const INP_STYLE = {
   width: '100%', padding: '12px 16px', borderRadius: 12,
@@ -15,7 +16,7 @@ const LBL_STYLE = {
 };
 
 export default function RegisterPage() {
-  const { register } = useAuth();
+  const { register, googleLogin } = useAuth();
   const nav = useNavigate();
   const [form,  setForm]  = useState({ email:'', password:'', username:'', displayName:'', age:'' });
   const [error, setError] = useState('');
@@ -25,8 +26,8 @@ export default function RegisterPage() {
     e.preventDefault();
     setError(''); setBusy(true);
     try {
-      await register(form);
-      nav('/dashboard');
+      const user = await register(form);
+      nav(user.role === 'ADMIN' ? '/admin' : '/onboarding');
     } catch (err) {
       if (err.response?.status === 409) {
         setError('ALREADY_EXISTS');
@@ -187,6 +188,32 @@ export default function RegisterPage() {
                 {busy ? '⏳ Creating account...' : '🌿 Start Adventure!'}
               </button>
             </form>
+
+            {/* Google Sign-Up */}
+            <div style={{ marginTop: 20 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+                <div style={{ flex: 1, height: 1, background: '#F0E4DC' }} />
+                <span style={{ color: '#8A7060', fontSize: 12, fontWeight: 700 }}>OR</span>
+                <div style={{ flex: 1, height: 1, background: '#F0E4DC' }} />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'center' }}>
+                <GoogleLogin
+                  onSuccess={async ({ credential }) => {
+                    try {
+                      const user = await googleLogin(credential);
+                      if (user.role === 'ADMIN') nav('/admin');
+                      else if (user.isNew) nav('/onboarding');
+                      else nav('/dashboard');
+                    } catch (e) {
+                      setError(e.response?.data?.error || 'Google sign-up failed');
+                    }
+                  }}
+                  onError={() => setError('Google sign-up failed')}
+                  shape="pill"
+                  text="signup_with"
+                />
+              </div>
+            </div>
 
             <div style={{
               marginTop: 24, paddingTop: 20,
