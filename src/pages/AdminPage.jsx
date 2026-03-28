@@ -144,7 +144,7 @@ function CoursesTab({ courses, setCourses }) {
   const [editCourse,   setEditCourse] = useState(null); // course object being edited
   const [lessonCourse, setLessonCourse] = useState(null); // course whose sessions we're managing
   const [quizSession,  setQuizSession]  = useState(null); // {id, title} quiz session for QuizBuilder
-  const [form, setForm] = useState({ title:'', emoji:'', description:'', subject:'', color:'#00C8E8', ageGroup:'5-13' });
+  const [form, setForm] = useState({ title:'', emoji:'', description:'', subject:'', color:'#00C8E8', ageGroup:'5-13', freeSessionCount:4 });
   const [saving, setSaving] = useState(false);
   const f = v => e => setForm(p => ({ ...p, [v]: e.target.value }));
 
@@ -190,7 +190,7 @@ function CoursesTab({ courses, setCourses }) {
         setCourses(cs => [...cs, r.data]);
       }
       setShowAdd(false); setEditCourse(null);
-      setForm({ title:'', emoji:'', description:'', subject:'', color:'#00C8E8', ageGroup:'5-13' });
+      setForm({ title:'', emoji:'', description:'', subject:'', color:'#00C8E8', ageGroup:'5-13', freeSessionCount:4 });
     } catch(e) { alert(e.response?.data?.error || 'Save failed'); }
     finally { setSaving(false); }
   }
@@ -198,7 +198,8 @@ function CoursesTab({ courses, setCourses }) {
   function startEdit(course) {
     setEditCourse(course);
     setForm({ title:course.title, emoji:course.emoji, description:course.description||'',
-      subject:course.subject, color:course.color||'#00C8E8', ageGroup:course.ageGroup||'5-13' });
+      subject:course.subject, color:course.color||'#00C8E8', ageGroup:course.ageGroup||'5-13',
+      freeSessionCount: course.freeSessionCount ?? 4 });
     setShowAdd(true);
   }
 
@@ -270,6 +271,14 @@ function CoursesTab({ courses, setCourses }) {
                   style={{ width:44, height:40, border:`2px solid ${C.border}`, borderRadius:8, cursor:'pointer' }} />
                 <input style={{ ...inp, flex:1 }} value={form.color} onChange={f('color')} placeholder="#00C8E8" />
               </div>
+            </div>
+            <div>
+              <label style={lbl}>Free Sessions (before Premium required)</label>
+              <input style={inp} type="number" min="0"
+                value={form.freeSessionCount}
+                onChange={e => setForm(p => ({ ...p, freeSessionCount: parseInt(e.target.value)||0 }))}
+                placeholder="4" />
+              <div style={{ color:C.muted, fontSize:11, marginTop:3 }}>Sessions 1–N are free; rest require Premium</div>
             </div>
           </div>
           <div style={{ display:'flex', gap:10, marginTop:16 }}>
@@ -737,8 +746,18 @@ function AnalyticsTab() {
    SETTINGS TAB
 ══════════════════════════════════════════════════ */
 function SettingsTab() {
-  const [saved,   setSaved]   = useState('');
-  const [sending, setSending] = useState(false);
+  const [saved,        setSaved]        = useState('');
+  const [sending,      setSending]      = useState(false);
+  const [premiumPrice, setPremiumPrice] = useState('');
+  const [priceLoaded,  setPriceLoaded]  = useState(false);
+
+  useEffect(() => {
+    api.get('/admin/settings').then(r => {
+      const paise = r.data?.PRICE_PREMIUM;
+      if (paise) setPremiumPrice(String(Math.round(parseInt(paise, 10) / 100)));
+      setPriceLoaded(true);
+    }).catch(() => setPriceLoaded(true));
+  }, []);
 
   const sections = [
     { key:'branding', title:'🌐 Branding',  color:C.cyan,   fields:['Platform Name','Tagline','Logo URL','Support Email'] },
@@ -746,6 +765,15 @@ function SettingsTab() {
     { key:'razorpay', title:'💳 Razorpay',  color:C.lime,   fields:['API Key','Secret Key','Webhook URL','Currency'] },
     { key:'email',    title:'📧 Email',     color:C.pink,   fields:['SMTP Host / Resend API Key','From Email','Welcome Template URL','Report Day (0=Sun)'] },
   ];
+
+  async function savePremiumPrice() {
+    const rupees = parseInt(premiumPrice, 10);
+    if (!rupees || rupees < 1) return alert('Enter a valid amount in ₹');
+    const paise = rupees * 100;
+    await api.patch('/admin/settings', { PRICE_PREMIUM: paise });
+    setSaved('pricing');
+    setTimeout(() => setSaved(''), 2000);
+  }
 
   async function saveSection(key) {
     await api.patch('/admin/settings', { [key]: true });
@@ -765,6 +793,39 @@ function SettingsTab() {
   return (
     <>
       <STitle emoji="⚙️" color={C.purple}>Platform Settings</STitle>
+
+      {/* ── Pricing card ── */}
+      <div style={{ background:`linear-gradient(135deg,${C.lime}22,#FFFEF0)`,
+        border:`4px solid ${C.lime}`, borderRadius:24, padding:24, marginBottom:20,
+        boxShadow:`0 9px 0 ${C.lime}55` }}>
+        <div style={{ fontFamily:FONT_HEAD, fontSize:20, color:C.lime, marginBottom:6 }}>💰 Subscription Pricing</div>
+        <div style={{ color:C.muted, fontSize:13, marginBottom:14 }}>
+          Set the monthly subscription price shown on the Pricing page and charged via Razorpay.
+        </div>
+        <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
+          <div style={{ flex:1, minWidth:160 }}>
+            <label style={lbl}>PREMIUM Price (₹ per month)</label>
+            <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+              <span style={{ fontFamily:FONT_HEAD, fontSize:20, color:C.lime }}>₹</span>
+              <input
+                style={{ ...inp, flex:1 }}
+                type="number"
+                min="1"
+                value={priceLoaded ? premiumPrice : ''}
+                onChange={e => setPremiumPrice(e.target.value)}
+                placeholder={priceLoaded ? '1499' : 'Loading…'}
+              />
+            </div>
+            <div style={{ color:C.muted, fontSize:11, marginTop:4 }}>
+              Default: ₹1,499 · Will be charged in paise (×100) via Razorpay
+            </div>
+          </div>
+          <Btn onClick={savePremiumPrice} color={C.lime} textColor={C.txt} sm style={{ alignSelf:'flex-end', marginBottom:4 }}>
+            {saved==='pricing' ? '✓ Saved!' : 'Save Price'}
+          </Btn>
+        </div>
+      </div>
+
       <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(340px,1fr))', gap:20 }}>
         {sections.map(s => (
           <div key={s.key} style={{ background:`linear-gradient(135deg,${s.color}22,#fff)`,

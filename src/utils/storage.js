@@ -15,7 +15,14 @@ export function clearToken()       { localStorage.removeItem(KEYS.TOKEN); }
 export function getLastLesson()    { return localStorage.getItem(KEYS.LAST_LESSON); }
 export function setLastLesson(id)  { localStorage.setItem(KEYS.LAST_LESSON, id); }
 
-/** Save editor draft so kids don't lose work on refresh */
-export function getEditorDraft(sessionId)        { return localStorage.getItem(KEYS.EDITOR_CODE + sessionId) || ''; }
-export function setEditorDraft(sessionId, code)  { localStorage.setItem(KEYS.EDITOR_CODE + sessionId, code); }
-export function clearEditorDraft(sessionId)      { localStorage.removeItem(KEYS.EDITOR_CODE + sessionId); }
+/** Save editor draft so kids don't lose work on refresh.
+ *  draft can be a string (legacy) or an object { html, css, js } (multi-tab). */
+export function getEditorDraft(sessionId) {
+  const raw = localStorage.getItem(KEYS.EDITOR_CODE + sessionId);
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch (_) { return raw; } // legacy string fallback
+}
+export function setEditorDraft(sessionId, draft) {
+  localStorage.setItem(KEYS.EDITOR_CODE + sessionId, JSON.stringify(draft));
+}
+export function clearEditorDraft(sessionId) { localStorage.removeItem(KEYS.EDITOR_CODE + sessionId); }

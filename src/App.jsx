@@ -3,9 +3,11 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { CourseProvider } from './context/CourseContext';
 
-import LandingPage      from './pages/LandingPage';
-import LoginPage        from './pages/LoginPage';
-import RegisterPage     from './pages/RegisterPage';
+import LandingPage          from './pages/LandingPage';
+import LoginPage            from './pages/LoginPage';
+import RegisterPage         from './pages/RegisterPage';
+import ForgotPasswordPage   from './pages/ForgotPasswordPage';
+import ResetPasswordPage    from './pages/ResetPasswordPage';
 import DashboardPage    from './pages/DashboardPage';
 import CoursePage       from './pages/CoursePage';
 import LessonPage       from './pages/LessonPage';
@@ -19,9 +21,12 @@ import NotFoundPage     from './pages/NotFoundPage';
 
 function LoadingSpinner() {
   return (
-    <div style={{ display:'flex', alignItems:'center', justifyContent:'center',
-      height:'100vh', fontSize:64, animation:'sway 1.2s ease-in-out infinite',
-      background:'linear-gradient(160deg,#062213,#0D3B22)' }}>🐸</div>
+    <>
+      <style>{`@keyframes cq-bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-12px)}}`}</style>
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'center',
+        height:'100vh', fontSize:64, animation:'cq-bob 1.2s ease-in-out infinite',
+        background:'linear-gradient(160deg,#062213,#0D3B22)' }}>🐸</div>
+    </>
   );
 }
 
@@ -54,9 +59,11 @@ export default function App() {
       <Routes>
         {/* Public */}
         <Route path="/"          element={<LandingPage />} />
-        <Route path="/login"     element={<LoginPage />} />
-        <Route path="/register"  element={<RegisterPage />} />
-        <Route path="/pricing"   element={<PricingPage />} />
+        <Route path="/login"            element={<LoginPage />} />
+        <Route path="/register"         element={<RegisterPage />} />
+        <Route path="/forgot-password"  element={<ForgotPasswordPage />} />
+        <Route path="/reset-password"   element={<ResetPasswordPage />} />
+        <Route path="/pricing"          element={<PricingPage />} />
 
         {/* Student */}
         <Route path="/dashboard"   element={<PrivateRoute><DashboardPage /></PrivateRoute>} />

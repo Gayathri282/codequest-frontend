@@ -17,7 +17,15 @@ export async function startPayment({ plan, user, onSuccess, onError }) {
   if (!loaded) return onError?.('Could not load payment SDK');
 
   // 1. Create order on backend
-  const { data } = await api.post('/payments/create-order', { plan });
+  let data;
+  try {
+    const res = await api.post('/payments/create-order', { plan });
+    data = res.data;
+  } catch (err) {
+    const msg = err.response?.data?.error || err.message || 'Could not create payment order';
+    onError?.(msg);
+    return;
+  }
 
   // 2. Open Razorpay modal
   const options = {
@@ -27,7 +35,6 @@ export async function startPayment({ plan, user, onSuccess, onError }) {
     order_id:    data.orderId,
     name:        'CodeQuest',
     description: `${plan} Plan`,
-    image:       '/logo.png',
     prefill: {
       name:  user.displayName || user.username,
       email: user.email,
@@ -47,7 +54,7 @@ export async function startPayment({ plan, user, onSuccess, onError }) {
       }
     },
     modal: {
-      ondismiss: () => onError?.('Payment cancelled'),
+      ondismiss: () => {},  // user closed modal — not an error
     }
   };
 

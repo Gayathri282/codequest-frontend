@@ -1,7 +1,18 @@
-// frontend/src/pages/RegisterPage.jsx
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+
+const INP_STYLE = {
+  width: '100%', padding: '12px 16px', borderRadius: 12,
+  border: '2.5px solid #E8D8CC', fontSize: 14,
+  fontFamily: "'Quicksand', sans-serif", fontWeight: 600,
+  background: '#FFF', color: '#1A0A00', boxSizing: 'border-box',
+  transition: 'border-color 0.15s, background 0.15s',
+};
+const LBL_STYLE = {
+  fontSize: 12, fontWeight: 800, color: '#5A3A20',
+  display: 'block', marginBottom: 6, letterSpacing: 0.5,
+};
 
 export default function RegisterPage() {
   const { register } = useAuth();
@@ -17,94 +28,182 @@ export default function RegisterPage() {
       await register(form);
       nav('/dashboard');
     } catch (err) {
-      setError(err.response?.data?.error || 'Registration failed');
+      if (err.response?.status === 409) {
+        setError('ALREADY_EXISTS');
+      } else {
+        setError(err.response?.data?.error || 'Registration failed');
+      }
     } finally { setBusy(false); }
   }
 
-  const inp = {
-    width:'100%', padding:'11px 14px', borderRadius:12,
-    border:'2.5px solid #A8EED4', fontSize:14,
-    fontFamily:"'Quicksand',sans-serif", fontWeight:600,
-    background:'#F0FFF8', outline:'none', boxSizing:'border-box', color:'#062213',
-  };
-  const lbl = { fontSize:12, color:'#7ED957', fontWeight:700, display:'block', marginBottom:4 };
-
   return (
-    <div style={{ minHeight:'100vh',
-      background:'linear-gradient(160deg,#062213,#0D3B22,#1A6B3C)',
-      display:'flex', alignItems:'center', justifyContent:'center',
-      padding:24, fontFamily:"'Quicksand',sans-serif", position:'relative', overflow:'hidden' }}>
+    <>
+      <style>{`
+        @keyframes cq-bob  { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-10px)} }
+        @keyframes cq-rise { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:none} }
+        .cq-ri:focus { border-color:#00C8A0 !important; background:#F0FFF9 !important; outline:none; }
+        .cq-reg-btn:hover:not(:disabled) { transform:translateY(-2px); filter:brightness(1.08); }
+        .cq-reg-btn:active:not(:disabled) { transform:translateY(1px); box-shadow:0 2px 0 #006E55 !important; }
+        .cq-rsplit { display:grid; grid-template-columns:1fr 1fr; min-height:100vh; }
+        @media(max-width:680px){ .cq-rsplit{ grid-template-columns:1fr; } .cq-rleft{ display:none; } }
+      `}</style>
 
-      {/* Leaf decorations */}
-      {['8%','88%','3%','94%','50%'].map((l,i)=>(
-        <div key={i} style={{ position:'absolute', left:l, top:`${10+i*16}%`,
-          fontSize:28+i*4, opacity:.15, animation:`sway ${3+i*.4}s ease-in-out infinite`,
-          animationDelay:`${i*.35}s` }}>🍃</div>
-      ))}
+      <div className="cq-rsplit" style={{ fontFamily: "'Quicksand', sans-serif" }}>
 
-      <div style={{ background:'rgba(6,34,19,.85)', backdropFilter:'blur(12px)',
-        borderRadius:26, border:'2px solid rgba(0,200,160,.3)',
-        boxShadow:'0 20px 60px rgba(0,0,0,.5)',
-        padding:'36px 34px', maxWidth:440, width:'100%', position:'relative', zIndex:2 }}>
+        {/* ── Left panel ── */}
+        <div className="cq-rleft" style={{
+          background: 'linear-gradient(145deg, #0D3B22 0%, #1A6B3C 50%, #00C8A0 100%)',
+          display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center',
+          padding: 48, position: 'relative', overflow: 'hidden',
+        }}>
+          {[200, 310, 420].map((s, i) => (
+            <div key={i} style={{
+              position: 'absolute', width: s, height: s, borderRadius: '50%',
+              border: '2px solid rgba(255,255,255,0.12)',
+              top: '50%', left: '50%', transform: 'translate(-50%,-50%)',
+            }} />
+          ))}
 
-        <div style={{ textAlign:'center', marginBottom:24 }}>
-          <div style={{ fontSize:56, animation:'bob 2s ease-in-out infinite', display:'inline-block' }}>🐸</div>
-          <h1 style={{ fontFamily:"'Fredoka One',cursive", fontSize:28,
-            color:'#00C8A0', margin:'8px 0 4px' }}>Join the Jungle!</h1>
-          <p style={{ color:'rgba(232,255,245,.55)', fontSize:13 }}>
-            Create your account and earn your first coin 🪙
-          </p>
+          <div style={{ position: 'relative', zIndex: 2, textAlign: 'center' }}>
+            <div style={{ fontSize: 96, animation: 'cq-bob 2s ease-in-out infinite', display: 'inline-block' }}>🐸</div>
+
+            <div style={{
+              background: 'rgba(0,0,0,0.2)', borderRadius: 20,
+              padding: '24px 32px', marginTop: 20,
+              border: '2px solid rgba(255,255,255,0.2)',
+            }}>
+              <h2 style={{
+                fontFamily: "'Fredoka One', cursive",
+                fontSize: 30, color: '#fff', margin: '0 0 10px',
+              }}>Join the Jungle!</h2>
+              <p style={{ color: 'rgba(255,255,255,0.85)', fontSize: 14, margin: 0, fontWeight: 600 }}>
+                Build real websites · Earn XP<br/>Collect coins · Unlock badges
+              </p>
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 20, flexWrap: 'wrap' }}>
+              {['🪙 Free to start', '🎯 Real projects', '🏅 Earn badges'].map(t => (
+                <span key={t} style={{
+                  background: 'rgba(255,255,255,0.18)', borderRadius: 50,
+                  padding: '5px 12px', color: '#fff', fontSize: 12, fontWeight: 700,
+                }}>{t}</span>
+              ))}
+            </div>
+          </div>
         </div>
 
-        {error && (
-          <div style={{ background:'rgba(255,71,87,.15)', border:'2px solid #FF4757',
-            borderRadius:10, padding:'10px 14px', color:'#FF7F8E',
-            marginBottom:16, fontSize:13, fontWeight:600 }}>{error}</div>
-        )}
+        {/* ── Right panel — form ── */}
+        <div style={{
+          background: '#FFFAF8',
+          display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center',
+          padding: '48px 56px',
+          animation: 'cq-rise 0.4s ease both',
+        }}>
+          <div style={{ width: '100%', maxWidth: 360 }}>
 
-        <form onSubmit={handleSubmit}>
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:11, marginBottom:11 }}>
-            {[
-              { label:'Display Name', field:'displayName', type:'text',   placeholder:'e.g. Alex', full:true },
-              { label:'Username',     field:'username',    type:'text',   placeholder:'e.g. jungle_alex' },
-              { label:'Age',          field:'age',         type:'number', placeholder:'e.g. 10' },
-            ].map(f => (
-              <div key={f.field} style={{ gridColumn: f.full ? '1 / -1' : undefined }}>
-                <label style={lbl}>{f.label}</label>
-                <input style={inp} type={f.type} placeholder={f.placeholder}
-                  value={form[f.field]} onChange={e => setForm(p=>({...p,[f.field]:e.target.value}))} />
+            <div style={{ marginBottom: 28 }}>
+              <div style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                background: '#E8FFF5', borderRadius: 50,
+                padding: '6px 14px', marginBottom: 14,
+                border: '1.5px solid #A8EED4',
+              }}>
+                <span style={{ fontSize: 14 }}>🌿</span>
+                <span style={{ fontSize: 12, fontWeight: 700, color: '#00956F' }}>NEW ADVENTURER</span>
               </div>
-            ))}
-          </div>
-          <div style={{ marginBottom:11 }}>
-            <label style={lbl}>Email (parent's email for kids under 13)</label>
-            <input style={inp} type="email" required placeholder="parent@email.com"
-              value={form.email} onChange={e => setForm(p=>({...p,email:e.target.value}))} />
-          </div>
-          <div style={{ marginBottom:24 }}>
-            <label style={lbl}>Password</label>
-            <input style={inp} type="password" required minLength={8} placeholder="Min. 8 characters"
-              value={form.password} onChange={e => setForm(p=>({...p,password:e.target.value}))} />
-          </div>
-          <button type="submit" disabled={busy} style={{
-            width:'100%',
-            background: busy ? '#1A3D2A' : 'linear-gradient(180deg,#00C8A0,#009E7A)',
-            border:'3px solid #00C8A0', borderRadius:14,
-            color:'#fff', padding:'13px',
-            fontFamily:"'Fredoka One',cursive", fontSize:18,
-            cursor: busy ? 'not-allowed' : 'pointer',
-            boxShadow:'0 5px 0 #006E55',
-          }}>{busy ? '⏳ Creating account...' : '🌿 Start Adventure!'}</button>
-        </form>
+              <h1 style={{
+                fontFamily: "'Fredoka One', cursive",
+                fontSize: 30, color: '#1A0A00', margin: '0 0 6px',
+              }}>Create your account</h1>
+              <p style={{ color: '#8A7060', fontSize: 13, margin: 0, fontWeight: 600 }}>
+                Earn your first coin when you register 🪙
+              </p>
+            </div>
 
-        <p style={{ textAlign:'center', marginTop:18, color:'rgba(232,255,245,.5)', fontSize:13 }}>
-          Already a coder?{' '}
-          <Link to="/login" style={{ color:'#7ED957', fontWeight:700 }}>Log in →</Link>
-        </p>
-        <p style={{ textAlign:'center', color:'rgba(232,255,245,.3)', fontSize:11, marginTop:8 }}>
-          By registering you agree to our Terms of Service.
-        </p>
+            {error && (
+              <div style={{
+                background: '#FFF0F0', border: '2px solid #FF4757',
+                borderRadius: 10, padding: '10px 14px',
+                color: '#C0392B', fontSize: 13, fontWeight: 700, marginBottom: 16,
+              }}>
+                {error === 'ALREADY_EXISTS' ? (
+                  <>This email is already registered.{' '}
+                    <Link to="/login" style={{ color:'#C0392B', fontWeight:800 }}>Log in instead →</Link>
+                  </>
+                ) : error}
+              </div>
+            )}
+
+            <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <label style={LBL_STYLE}>DISPLAY NAME</label>
+                  <input className="cq-ri" style={INP_STYLE} type="text" placeholder="e.g. Alex"
+                    value={form.displayName} onChange={e => setForm(p => ({ ...p, displayName: e.target.value }))} />
+                </div>
+                <div>
+                  <label style={LBL_STYLE}>USERNAME</label>
+                  <input className="cq-ri" style={INP_STYLE} type="text" placeholder="jungle_alex"
+                    value={form.username} onChange={e => setForm(p => ({ ...p, username: e.target.value }))} />
+                </div>
+                <div>
+                  <label style={LBL_STYLE}>AGE</label>
+                  <input className="cq-ri" style={INP_STYLE} type="number" placeholder="e.g. 10"
+                    value={form.age} onChange={e => setForm(p => ({ ...p, age: e.target.value }))} />
+                </div>
+              </div>
+
+              <div>
+                <label style={LBL_STYLE}>EMAIL</label>
+                <input className="cq-ri" style={INP_STYLE} type="email" required
+                  placeholder="parent@email.com (under 13)"
+                  value={form.email} onChange={e => setForm(p => ({ ...p, email: e.target.value }))} />
+              </div>
+
+              <div>
+                <label style={LBL_STYLE}>PASSWORD</label>
+                <input className="cq-ri" style={INP_STYLE} type="password" required minLength={8}
+                  placeholder="Min. 8 characters"
+                  value={form.password} onChange={e => setForm(p => ({ ...p, password: e.target.value }))} />
+              </div>
+
+              <button
+                type="submit"
+                disabled={busy}
+                className="cq-reg-btn"
+                style={{
+                  marginTop: 6,
+                  background: busy ? '#CDB8AC' : 'linear-gradient(180deg, #00C8A0, #009E7A)',
+                  border: 'none', borderRadius: 14,
+                  color: '#fff', padding: '14px',
+                  fontFamily: "'Fredoka One', cursive", fontSize: 18,
+                  cursor: busy ? 'not-allowed' : 'pointer',
+                  boxShadow: busy ? 'none' : '0 4px 0 #006E55',
+                  transition: 'transform 0.12s, filter 0.12s, box-shadow 0.12s',
+                }}
+              >
+                {busy ? '⏳ Creating account...' : '🌿 Start Adventure!'}
+              </button>
+            </form>
+
+            <div style={{
+              marginTop: 24, paddingTop: 20,
+              borderTop: '2px solid #F0E4DC',
+              textAlign: 'center',
+            }}>
+              <span style={{ color: '#8A7060', fontSize: 14, fontWeight: 600 }}>Already a coder? </span>
+              <Link to="/login" style={{ color: '#00956F', fontWeight: 800, fontSize: 14, textDecoration: 'none' }}>
+                Log in →
+              </Link>
+            </div>
+            <p style={{ textAlign: 'center', color: '#C4A898', fontSize: 11, marginTop: 10 }}>
+              By registering you agree to our Terms of Service.
+            </p>
+          </div>
+        </div>
       </div>
-    </div>
+    </>
   );
 }

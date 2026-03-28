@@ -4,243 +4,448 @@ import { useEffect, useRef, useState } from 'react';
 const C = { orange:'#FF6B35', cyan:'#00C8E8', lime:'#7ED957' };
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 
-function buildEmbedUrl(url) {
-  if (!url) return null;
-  const params = new URLSearchParams({
-    rel:            '0',
-    modestbranding: '1',
-    showinfo:       '0',
-    iv_load_policy: '3',
-    enablejsapi:    '1',   // required for postMessage control
-    cc_load_policy: '0',   // captions off by default (user toggles)
-    fs:             '0',   // disable YouTube's native fullscreen
-    origin: window.location.origin,
-  });
+/* ─── helpers ─────────────────────────────────────────── */
+function isYouTube(url) {
+  if (!url) return false;
   try {
-    const u = new URL(url);
-    let id = null;
-    if (u.hostname === 'youtu.be') id = u.pathname.slice(1);
-    else if (/youtube\.com/.test(u.hostname) && u.pathname === '/watch') id = u.searchParams.get('v');
-    else if (/youtube\.com/.test(u.hostname) && u.pathname.startsWith('/embed/'))
-      id = u.pathname.split('/embed/')[1]?.split('?')[0];
-    if (id) return `https://www.youtube.com/embed/${id}?${params}`;
-  } catch (_) {}
-  return url; // non-YouTube URL — pass through as-is
+    const h = new URL(url).hostname;
+    return h === 'youtu.be' || /youtube\.com/.test(h);
+  } catch (_) { return false; }
 }
 
-export default function VideoPlayer({ videoUrl, missionText, docContent }) {
-  const iframeRef  = useRef(null);
-  const wrapperRef = useRef(null);
+function extractYTId(url) {
+  try {
+    const u = new URL(url);
+    if (u.hostname === 'youtu.be')                 return u.pathname.slice(1).split('?')[0];
+    if (u.pathname === '/watch')                    return u.searchParams.get('v');
+    if (u.pathname.startsWith('/embed/'))           return u.pathname.split('/embed/')[1]?.split('?')[0];
+  } catch (_) {}
+  return null;
+}
 
+let ytApiLoading = false;
+function loadYTApi(cb) {
+  if (window.YT?.Player) { cb(); return; }
+  const prev = window.onYouTubeIframeAPIReady;
+  window.onYouTubeIframeAPIReady = () => { prev?.(); cb(); };
+  if (!ytApiLoading) {
+    ytApiLoading = true;
+    const s = document.createElement('script');
+    s.src = 'https://www.youtube.com/iframe_api';
+    document.head.appendChild(s);
+  }
+}
+
+/* ─── root component ──────────────────────────────────── */
+export default function VideoPlayer({ videoUrl, missionText, docContent, fullView = false, onCanComplete }) {
+  return isYouTube(videoUrl)
+    ? <YTPlayer    url={videoUrl} missionText={missionText} docContent={docContent} fullView={fullView} onCanComplete={onCanComplete} />
+    : <EmbedPlayer url={videoUrl} missionText={missionText} docContent={docContent} fullView={fullView} onCanComplete={onCanComplete} />;
+}
+
+/* ─── YouTube player ──────────────────────────────────── */
+function YTPlayer({ url, missionText, docContent, fullView, onCanComplete }) {
+  const containerRef   = useRef(null);
+  const playerRef      = useRef(null);
+  const wrapperRef     = useRef(null);
+  const firedRef       = useRef(false);       // track if we already called onCanComplete
+  const onCompleteRef  = useRef(onCanComplete);
+
+  const [ready,    setReady]    = useState(false);
+  const [playing,  setPlaying]  = useState(false);
   const [speed,    setSpeed]    = useState(1);
   const [ccOn,     setCcOn]     = useState(false);
-  const [playing,  setPlaying]  = useState(false);
-  const [fsActive, setFsActive] = useState(false);
-  const playerReady = useRef(false);
-  const cmdQueue    = useRef([]);
+  const [fsOn,     setFsOn]     = useState(false);
+  const [watchPct, setWatchPct] = useState(0);  // 0–100 display
 
-  const embedUrl = buildEmbedUrl(videoUrl);
+  const videoId = extractYTId(url);
 
-  /* Send a command — queues it if the player isn't ready yet */
-  function yt(func, args = '') {
-    const msg = JSON.stringify({ event: 'command', func, args });
-    if (!playerReady.current) {
-      cmdQueue.current.push(msg);
-      return;
-    }
-    iframeRef.current?.contentWindow?.postMessage(msg, 'https://www.youtube.com');
-  }
+  // Keep callback ref in sync without re-running effects
+  useEffect(() => { onCompleteRef.current = onCanComplete; }, [onCanComplete]);
 
-  /* Listen for events coming back FROM the YouTube iframe */
+  // Build / rebuild player when videoId changes
   useEffect(() => {
-    function onMsg(e) {
-      if (e.origin !== 'https://www.youtube.com') return;
+    if (!videoId) return;
+    firedRef.current = false;
+    setReady(false); setPlaying(false); setSpeed(1); setCcOn(false); setWatchPct(0);
+
+    function init() {
+      if (!containerRef.current) return;
+      try { playerRef.current?.destroy(); } catch (_) {}
+      playerRef.current = null;
+      containerRef.current.innerHTML = '';
+      const div = document.createElement('div');
+      containerRef.current.appendChild(div);
+
+      playerRef.current = new window.YT.Player(div, {
+        videoId,
+        width:  '100%',
+        height: '100%',
+        playerVars: { rel:0, modestbranding:1, iv_load_policy:3, cc_load_policy:0, fs:0, playsinline:1 },
+        events: {
+          onReady: () => setReady(true),
+          onStateChange: (e) => {
+            setPlaying(e.data === 1 || e.data === 3);
+            // 0 = ENDED — video ran all the way through
+            if (e.data === 0 && !firedRef.current) {
+              firedRef.current = true;
+              setWatchPct(100);
+              onCompleteRef.current?.();
+              return;
+            }
+            // Any state change (seek, pause, resume) — immediately check position
+            try {
+              const dur = playerRef.current?.getDuration?.() ?? 0;
+              const cur = playerRef.current?.getCurrentTime?.() ?? 0;
+              if (dur > 0) {
+                const pct = cur / dur;
+                setWatchPct(Math.min(100, Math.round(pct * 100)));
+                if (pct >= 0.75 && !firedRef.current) {
+                  firedRef.current = true;
+                  onCompleteRef.current?.();
+                }
+              }
+            } catch (_) {}
+          },
+          onError: () => setReady(false),
+        },
+      });
+    }
+
+    loadYTApi(init);
+
+    return () => {
+      try { playerRef.current?.destroy(); } catch (_) {}
+      playerRef.current = null;
+      if (containerRef.current) containerRef.current.innerHTML = '';
+    };
+  }, [videoId]);
+
+  // Poll seek-bar position every 500 ms — works correctly at any playback speed
+  useEffect(() => {
+    if (!ready) return;
+    function checkProgress() {
       try {
-        const d = JSON.parse(typeof e.data === 'string' ? e.data : JSON.stringify(e.data));
-        if (d.event === 'onReady') {
-          // Player is ready — flush any queued commands
-          playerReady.current = true;
-          cmdQueue.current.forEach(msg =>
-            iframeRef.current?.contentWindow?.postMessage(msg, 'https://www.youtube.com')
-          );
-          cmdQueue.current = [];
-        }
-        if (d.event === 'onStateChange') {
-          // 1=playing, 3=buffering → show Pause; everything else → show Play
-          setPlaying(d.info === 1 || d.info === 3);
+        const dur = playerRef.current?.getDuration?.() ?? 0;
+        const cur = playerRef.current?.getCurrentTime?.() ?? 0;
+        if (dur > 0) {
+          const pct = cur / dur;
+          setWatchPct(Math.min(100, Math.round(pct * 100)));
+          if (pct >= 0.75 && !firedRef.current) {
+            firedRef.current = true;
+            onCompleteRef.current?.();
+          }
         }
       } catch (_) {}
     }
-    window.addEventListener('message', onMsg);
-    return () => {
-      window.removeEventListener('message', onMsg);
-      playerReady.current = false;
-      cmdQueue.current = [];
-    };
-  }, []);
+    const id = setInterval(checkProgress, 500);
+    return () => clearInterval(id);
+  }, [ready]);
 
-  /* Track browser fullscreen */
   useEffect(() => {
-    const h = () => setFsActive(!!document.fullscreenElement);
+    const h = () => setFsOn(!!document.fullscreenElement);
     document.addEventListener('fullscreenchange', h);
     return () => document.removeEventListener('fullscreenchange', h);
   }, []);
 
-  /* Controls */
   function togglePlay() {
-    if (playing) { yt('pauseVideo'); setPlaying(false); }
-    else         { yt('playVideo');  setPlaying(true);  }
+    if (!ready) return;
+    if (playing) { playerRef.current.pauseVideo(); setPlaying(false); }
+    else         { playerRef.current.playVideo();  setPlaying(true);  }
   }
-  function changeSpeed(s) {
-    setSpeed(s);
-    yt('setPlaybackRate', [s]);
+  function setRate(s) {
+    if (!ready) return;
+    setSpeed(s); playerRef.current.setPlaybackRate(s);
   }
   function toggleCC() {
-    const next = !ccOn;
-    setCcOn(next);
-    yt(next ? 'loadModule' : 'unloadModule', 'captions');
+    if (!ready) return;
+    const next = !ccOn; setCcOn(next);
+    if (next) { playerRef.current.loadModule('captions'); playerRef.current.setOption('captions','track',{languageCode:'en'}); }
+    else        { playerRef.current.unloadModule('captions'); }
   }
-  function toggleFullscreen() {
+  function toggleFs() {
     if (document.fullscreenElement) document.exitFullscreen();
     else wrapperRef.current?.requestFullscreen?.();
   }
 
-  return (
-    <div style={{ display:'flex', flexDirection:'column', flex:1, minHeight:0, background:'#fff' }}>
+  const unlocked = watchPct >= 75;
 
-      {/* Wrapper — fullscreen target so controls stay visible */}
+  return (
+    <div style={{ display:'flex', flexDirection:'column', flex:1, minHeight:0 }}>
       <div
         ref={wrapperRef}
+        onContextMenu={e => e.preventDefault()}
         style={{
-          background:'#000', flexShrink:0, display:'flex', flexDirection:'column',
-          ...(fsActive
+          background:'#000', display:'flex', flexDirection:'column',
+          userSelect:'none',
+          ...(fsOn
             ? { position:'fixed', inset:0, zIndex:9999 }
-            : { aspectRatio:'16/9' }),
+            : fullView
+              ? { flex:1, minHeight:0 }
+              : { flexShrink:0, aspectRatio:'16/9' }),
         }}
       >
-        {/* Video area */}
-        <div
-          style={{ flex:1, position:'relative', minHeight:0 }}
-          onContextMenu={e => e.preventDefault()}
-        >
-          {embedUrl ? (
-            <>
-              <iframe
-                ref={iframeRef}
-                src={embedUrl}
-                style={{ width:'100%', height:'100%', border:'none', display:'block' }}
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                title="Lesson video"
-              />
-              {/* Overlay: blocks right-click + double-click; routes clicks to togglePlay */}
-              <div
-                style={{ position:'absolute', inset:0, zIndex:2, cursor:'pointer' }}
-                onClick={togglePlay}
-                onDoubleClick={e => { e.stopPropagation(); e.preventDefault(); }}
-                onContextMenu={e => { e.stopPropagation(); e.preventDefault(); }}
-              />
-            </>
-          ) : (
-            <div style={{
-              position:'absolute', inset:0,
-              background:`linear-gradient(135deg,${C.cyan}33,#FF4FCB22)`,
-              display:'flex', flexDirection:'column',
-              alignItems:'center', justifyContent:'center', gap:12,
-            }}>
-              <div style={{ fontSize:64 }}>🎬</div>
-              <div style={{ fontFamily:"'Fredoka One',cursive", fontSize:20, color:'#1A2340',
-                textAlign:'center', padding:'0 20px' }}>
-                Video coming soon!<br/>
-                <span style={{ fontSize:13, color:'#6B82A8', fontFamily:"'Quicksand',sans-serif" }}>
-                  Upload via Admin → Sessions
-                </span>
-              </div>
+        <div style={{ flex:1, position:'relative', minHeight:0 }}>
+          <div ref={containerRef} style={{ width:'100%', height:'100%' }} />
+          {/* Right-click blocker only — pointerEvents:none so seek bar works normally */}
+          <div
+            style={{ position:'absolute', inset:0, zIndex:2, pointerEvents:'none' }}
+            onContextMenu={e => e.preventDefault()}
+          />
+          {!ready && (
+            <div style={{ position:'absolute', inset:0, zIndex:3, pointerEvents:'none',
+              display:'flex', alignItems:'center', justifyContent:'center' }}>
+              <span style={{ background:'rgba(0,0,0,.6)', color:'#aaa', borderRadius:8,
+                padding:'6px 16px', fontSize:12, fontFamily:"'Quicksand',sans-serif", fontWeight:700 }}>
+                Loading…
+              </span>
             </div>
           )}
         </div>
 
-        {/* Control bar */}
-        {embedUrl && (
-          <div style={{
-            background:'#0D1117', padding:'7px 14px', display:'flex',
-            alignItems:'center', gap:6, flexShrink:0, flexWrap:'wrap', zIndex:3,
-          }}>
-
-            {/* Play / Pause */}
-            <button onClick={togglePlay} style={btnStyle(C.lime, '#1A3020')}>
-              {playing ? '⏸ Pause' : '▶ Play'}
+        {/* Controls */}
+        <div style={{ background:'#0D1117', padding:'7px 12px', display:'flex',
+          alignItems:'center', gap:6, flexShrink:0, flexWrap:'wrap', zIndex:3 }}>
+          <button onClick={togglePlay} disabled={!ready} style={btn(ready ? C.lime : '#333','#1A3020',!ready)}>
+            {playing ? '⏸ Pause' : '▶ Play'}
+          </button>
+          <Sep />
+          <span style={{ color:'#5A7090', fontSize:10, fontWeight:700 }}>SPEED</span>
+          {SPEEDS.map(s => (
+            <button key={s} onClick={() => setRate(s)} disabled={!ready} style={pill(speed===s, C.cyan, !ready)}>
+              {s}×
             </button>
-
-            <Div />
-
-            {/* Speed */}
-            <span style={{ color:'#5A7090', fontSize:10, fontWeight:700, letterSpacing:.6 }}>SPEED</span>
-            {SPEEDS.map(s => (
-              <button key={s} onClick={() => changeSpeed(s)} style={pillStyle(speed === s, C.cyan)}>
-                {s}×
-              </button>
-            ))}
-
-            <Div />
-
-            {/* Captions */}
-            <button onClick={toggleCC} style={pillStyle(ccOn, C.cyan)}>
-              CC {ccOn ? 'ON' : 'OFF'}
-            </button>
-
-            <div style={{ flex:1 }} />
-
-            {/* Fullscreen */}
-            <button onClick={toggleFullscreen} style={pillStyle(fsActive, C.orange)}>
-              {fsActive ? '✕ Exit' : '⛶ Full'}
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* Mission + doc */}
-      <div style={{ flex:1, overflow:'auto', padding:16 }}>
-        <div style={{ fontFamily:"'Fredoka One',cursive", fontSize:18, color:C.orange, marginBottom:10 }}>
-          📋 Your Mission
+          ))}
+          <Sep />
+          <button onClick={toggleCC} disabled={!ready} style={pill(ccOn, C.cyan, !ready)}>
+            CC {ccOn ? 'ON' : 'OFF'}
+          </button>
+          <div style={{ flex:1 }} />
+          {/* Progress badge */}
+          {ready && (
+            <div style={{
+              display:'flex', alignItems:'center', gap:5,
+              background: unlocked ? 'rgba(126,217,87,.18)' : 'rgba(255,255,255,.08)',
+              border: `1.5px solid ${unlocked ? C.lime : 'rgba(255,255,255,.2)'}`,
+              borderRadius:8, padding:'3px 10px',
+            }}>
+              <div style={{ width:50, height:5, background:'rgba(255,255,255,.15)', borderRadius:5, overflow:'hidden' }}>
+                <div style={{ width:`${watchPct}%`, height:'100%',
+                  background: unlocked ? C.lime : C.cyan,
+                  borderRadius:5, transition:'width .5s' }} />
+              </div>
+              <span style={{ fontSize:10, fontWeight:700, color: unlocked ? C.lime : '#5A7090' }}>
+                {unlocked ? '✓ 75%' : `${watchPct}%`}
+              </span>
+            </div>
+          )}
+          <button onClick={toggleFs} style={pill(fsOn, C.orange, false)}>
+            {fsOn ? '✕ Exit' : '⛶ Full'}
+          </button>
         </div>
-        <div style={{
-          background:`linear-gradient(135deg,#E0F7FF,#B3ECFF)`,
-          border:`2px solid ${C.cyan}`, borderRadius:14,
-          padding:16, fontSize:14, color:'#1A2340',
-          lineHeight:1.8, whiteSpace:'pre-line', fontWeight:600,
-        }}>
-          {missionText || 'Watch the video and try coding along in the editor! 🚀'}
-        </div>
-        {docContent && (
-          <div style={{
-            marginTop:14, fontSize:14, color:'#1A2340', lineHeight:1.8,
-            background:'#F0FAFF', borderRadius:12, padding:14,
-            border:`2px solid ${C.cyan}44`, whiteSpace:'pre-line',
-          }}>
-            {docContent}
-          </div>
-        )}
       </div>
+      <Mission text={missionText} doc={docContent} fullView={fullView} />
     </div>
   );
 }
 
-function btnStyle(bg, color) {
-  return {
-    background:bg, border:'none', borderRadius:8, color,
-    cursor:'pointer', padding:'5px 14px',
-    fontFamily:"'Quicksand',sans-serif", fontSize:12, fontWeight:700,
-  };
+/* ─── Generic iframe player (Bunny, Vimeo, etc.) ─────── */
+function EmbedPlayer({ url, missionText, docContent, fullView, onCanComplete }) {
+  const wrapperRef    = useRef(null);
+  const iframeRef     = useRef(null);
+  const firedRef      = useRef(false);
+  const onCompleteRef = useRef(onCanComplete);
+  const gotMsgRef     = useRef(false);   // true once we receive a real timeupdate postMessage
+  const [fsOn,      setFsOn]      = useState(false);
+  const [embedPct,  setEmbedPct]  = useState(0);
+  const [fallbackPct, setFbPct]   = useState(0);
+
+  useEffect(() => { onCompleteRef.current = onCanComplete; }, [onCanComplete]);
+
+  function fire() {
+    if (firedRef.current) return;
+    firedRef.current = true;
+    onCompleteRef.current?.();
+  }
+
+  // Listen for postMessage events from the embed iframe
+  // Bunny Stream sends: { event:'timeupdate', seconds:X, duration:Y }
+  // Vimeo sends:        { event:'timeupdate', data:{ seconds:X, duration:Y } }
+  useEffect(() => {
+    if (!url) return;
+    firedRef.current = false;
+    gotMsgRef.current = false;
+    setEmbedPct(0); setFbPct(0);
+
+    function onMessage(e) {
+      try {
+        const msg = typeof e.data === 'string' ? JSON.parse(e.data) : e.data;
+        let cur = 0, dur = 0;
+
+        // Bunny Stream format
+        if (msg?.event === 'timeupdate' && typeof msg.seconds === 'number') {
+          cur = msg.seconds; dur = msg.duration;
+        }
+        // Vimeo format
+        else if (msg?.event === 'timeupdate' && typeof msg.data?.seconds === 'number') {
+          cur = msg.data.seconds; dur = msg.data.duration;
+        }
+        // Generic: any object with currentTime / duration
+        else if (typeof msg?.currentTime === 'number' && typeof msg?.duration === 'number') {
+          cur = msg.currentTime; dur = msg.duration;
+        }
+
+        if (dur > 0) {
+          gotMsgRef.current = true;
+          const pct = cur / dur;
+          setEmbedPct(Math.min(100, Math.round(pct * 100)));
+          if (pct >= 0.75) fire();
+        }
+      } catch (_) {}
+    }
+
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [url]);
+
+  // Fallback timer — only used if no postMessage events arrive after 3 s
+  // Counts wall-clock seconds; assumes roughly 75% of the video = min watch time
+  useEffect(() => {
+    if (!url) return;
+    let count = 0;
+    const FALLBACK_SECS = 90; // unlock after 90 s of page time if no events received
+    const id = setInterval(() => {
+      if (gotMsgRef.current) return; // real events are flowing — skip timer
+      count++;
+      const pct = Math.min(100, Math.round((count / FALLBACK_SECS) * 100));
+      setFbPct(pct);
+      if (count >= FALLBACK_SECS) fire();
+    }, 1000);
+    return () => clearInterval(id);
+  }, [url]);
+
+  useEffect(() => {
+    const h = () => setFsOn(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', h);
+    return () => document.removeEventListener('fullscreenchange', h);
+  }, []);
+
+  function toggleFs() {
+    if (document.fullscreenElement) document.exitFullscreen();
+    else wrapperRef.current?.requestFullscreen?.();
+  }
+
+  // Show real pct if we have postMessage data, otherwise show fallback timer pct
+  const pct      = gotMsgRef.current ? embedPct : fallbackPct;
+  const unlocked = firedRef.current;
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', flex:1, minHeight:0 }}>
+      <div
+        ref={wrapperRef}
+        onContextMenu={e => e.preventDefault()}
+        style={{
+          background:'#000', display:'flex', flexDirection:'column',
+          userSelect:'none',
+          ...(fsOn
+            ? { position:'fixed', inset:0, zIndex:9999 }
+            : fullView
+              ? { flex:1, minHeight:0 }
+              : { flexShrink:0, aspectRatio:'16/9' }),
+        }}
+      >
+        <div style={{ flex:1, position:'relative', minHeight:0 }}>
+          {url ? (
+            <iframe
+              ref={iframeRef}
+              src={url}
+              style={{ width:'100%', height:'100%', border:'none', display:'block' }}
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
+              title="Lesson video"
+            />
+          ) : (
+            <div style={{ position:'absolute', inset:0, display:'flex', flexDirection:'column',
+              alignItems:'center', justifyContent:'center', gap:12,
+              background:`linear-gradient(135deg,${C.cyan}33,#FF4FCB22)` }}>
+              <div style={{ fontSize:64 }}>🎬</div>
+              <div style={{ fontFamily:"'Fredoka One',cursive", fontSize:18, color:'#1A2340', textAlign:'center' }}>
+                Video coming soon!
+                <br/><span style={{ fontSize:13, color:'#6B82A8', fontFamily:"'Quicksand',sans-serif" }}>
+                  Add URL via Admin → Sessions
+                </span>
+              </div>
+            </div>
+          )}
+          {url && <div style={{ position:'absolute', inset:0, zIndex:2, pointerEvents:'none' }} />}
+        </div>
+        {url && (
+          <div style={{ background:'#0D1117', padding:'7px 12px', display:'flex',
+            alignItems:'center', justifyContent:'flex-end', gap:8, zIndex:3, flexShrink:0 }}>
+            {/* Progress badge */}
+            <div style={{
+              display:'flex', alignItems:'center', gap:5,
+              background: unlocked ? 'rgba(126,217,87,.18)' : 'rgba(255,255,255,.08)',
+              border: `1.5px solid ${unlocked ? C.lime : 'rgba(255,255,255,.2)'}`,
+              borderRadius:8, padding:'3px 10px',
+            }}>
+              <div style={{ width:50, height:5, background:'rgba(255,255,255,.15)', borderRadius:5, overflow:'hidden' }}>
+                <div style={{ width:`${pct}%`, height:'100%',
+                  background: unlocked ? C.lime : C.cyan,
+                  borderRadius:5, transition:'width .5s' }} />
+              </div>
+              <span style={{ fontSize:10, fontWeight:700, color: unlocked ? C.lime : '#5A7090' }}>
+                {unlocked ? '✓ Ready' : `${pct}%`}
+              </span>
+            </div>
+            <button onClick={toggleFs} style={pill(fsOn, C.orange, false)}>
+              {fsOn ? '✕ Exit' : '⛶ Fullscreen'}
+            </button>
+          </div>
+        )}
+      </div>
+      <Mission text={missionText} doc={docContent} fullView={fullView} />
+    </div>
+  );
 }
-function pillStyle(active, activeColor) {
-  return {
-    background: active ? activeColor  : 'transparent',
-    color:      active ? '#1A2340'    : '#5A7090',
-    border:     `1.5px solid ${active ? activeColor : '#2D3561'}`,
-    borderRadius:6, padding:'3px 9px', fontSize:11, fontWeight:700,
-    cursor:'pointer', fontFamily:"'Quicksand',sans-serif",
-  };
+
+/* ─── Shared ──────────────────────────────────────────── */
+function Mission({ text, doc, fullView }) {
+  return (
+    <div style={fullView
+      ? { flexShrink:0, maxHeight:200, overflow:'auto', padding:'10px 16px',
+          borderTop:'2px solid #E0F0FF' }
+      : { flex:1, overflow:'auto', padding:16 }}>
+      <div style={{ fontFamily:"'Fredoka One',cursive", fontSize:18, color:C.orange, marginBottom:10 }}>
+        📋 Your Mission
+      </div>
+      <div style={{ background:'linear-gradient(135deg,#E0F7FF,#B3ECFF)',
+        border:`2px solid ${C.cyan}`, borderRadius:14,
+        padding:16, fontSize:14, color:'#1A2340', lineHeight:1.8,
+        whiteSpace:'pre-line', fontWeight:600 }}>
+        {text || 'Watch the video and try coding along in the editor! 🚀'}
+      </div>
+      {doc && (
+        <div style={{ marginTop:14, fontSize:14, color:'#1A2340', lineHeight:1.8,
+          background:'#F0FAFF', borderRadius:12, padding:14,
+          border:`2px solid ${C.cyan}44`, whiteSpace:'pre-line' }}>
+          {doc}
+        </div>
+      )}
+    </div>
+  );
 }
-function Div() {
+
+function btn(bg, color, disabled) {
+  return { background:bg, border:'none', borderRadius:8, color,
+    cursor:disabled?'not-allowed':'pointer', opacity:disabled?.45:1,
+    padding:'5px 14px', fontFamily:"'Quicksand',sans-serif", fontSize:12, fontWeight:700 };
+}
+function pill(active, ac, disabled) {
+  return { background:active?ac:'transparent', color:active?'#1A2340':'#5A7090',
+    border:`1.5px solid ${active?ac:'#2D3561'}`, borderRadius:6, padding:'3px 9px',
+    fontSize:11, fontWeight:700, cursor:disabled?'not-allowed':'pointer',
+    opacity:disabled?.45:1, fontFamily:"'Quicksand',sans-serif" };
+}
+function Sep() {
   return <div style={{ width:1, height:18, background:'#2D3561', margin:'0 2px' }} />;
 }

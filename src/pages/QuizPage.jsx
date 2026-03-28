@@ -2,7 +2,9 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../utils/api';
-import { useProgress } from '../hooks/useProgress';
+import { useProgress }      from '../hooks/useProgress';
+import { useAuth }          from '../context/AuthContext';
+import { useCourseContext } from '../context/CourseContext';
 import Hud from '../components/shared/Hud';
 import Btn from '../components/shared/Btn';
 
@@ -243,9 +245,11 @@ function ResultScreen({ result, coins, onBack }) {
 
 // ── Main QuizPage ─────────────────────────────────────────────
 export default function QuizPage() {
-  const { id } = useParams();
-  const nav = useNavigate();
-  const { completeSession } = useProgress();
+  const { id }  = useParams();
+  const nav     = useNavigate();
+  const { completeSession }  = useProgress();
+  const { user }             = useAuth();
+  const { courses }          = useCourseContext();
 
   const [questions,  setQuestions]  = useState([]);
   const [qi,         setQi]         = useState(0);
@@ -258,9 +262,25 @@ export default function QuizPage() {
   const [shake,      setShake]      = useState(false);
   const [done,       setDone]       = useState(false);
   const [loading,    setLoading]    = useState(true);
+  const [planError,  setPlanError]  = useState(false);
   // Already-completed state
   const [alreadyDone, setAlreadyDone] = useState(false);
   const [prevStars,   setPrevStars]   = useState(0);
+
+  const isPremium = user?.plan === 'PREMIUM' || user?.plan === 'BASIC' || user?.role === 'ADMIN';
+
+  // Find next session after this quiz
+  const nextSession = (() => {
+    for (const course of courses) {
+      const sorted = [...(course.sessions || [])].sort((a, b) => a.order - b.order);
+      const idx = sorted.findIndex(s => s.id === id);
+      if (idx >= 0) return sorted[idx + 1] ?? null;
+    }
+    return null;
+  })();
+
+  // Find the course this quiz belongs to
+  const parentCourse = courses.find(c => c.sessions?.some(s => s.id === id));
 
   useEffect(() => {
     api.get(`/quiz/${id}`)
@@ -273,7 +293,10 @@ export default function QuizPage() {
         }
         setLoading(false);
       })
-      .catch(() => nav('/dashboard'));
+      .catch(err => {
+        if (err.response?.status === 403) { setPlanError(true); setLoading(false); }
+        else nav('/dashboard');
+      });
   }, [id]);
 
   const q = questions[qi];
@@ -309,15 +332,75 @@ export default function QuizPage() {
       fontSize:48, background:'linear-gradient(160deg,#FFF9E6,#E8F4FF)' }}>⏳</div>
   );
 
+  // ── Premium plan required ──
+  if (planError) return (
+    <div style={{ minHeight:'100vh',
+      background:'radial-gradient(ellipse at 50% 20%,#0D3B22,#041A0E)',
+      display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
+      gap:20, padding:24, fontFamily:"'Quicksand',sans-serif" }}>
+      <div style={{ fontSize:80 }}>👑</div>
+      <div style={{ fontFamily:"'Fredoka One',cursive", fontSize:28, color:'#FFD700', textAlign:'center' }}>
+        This quiz is Premium only
+      </div>
+      <div style={{ color:'rgba(232,255,245,.7)', fontSize:15, textAlign:'center', maxWidth:320, fontWeight:600 }}>
+        Unlock all sessions, quizzes and more for ₹1,499 / month
+      </div>
+      <button onClick={() => nav('/pricing')}
+        style={{ background:'linear-gradient(135deg,#FFD700,#E8A800)', border:'3px solid #FFD700',
+          borderRadius:16, color:'#1A0E00', fontFamily:"'Fredoka One',cursive",
+          fontSize:20, padding:'14px 36px', cursor:'pointer', boxShadow:'0 6px 0 #A07800' }}>
+        👑 Upgrade to Premium →
+      </button>
+      <button onClick={() => nav(-1)} style={{ background:'transparent', border:'1.5px solid rgba(255,255,255,.3)',
+        borderRadius:12, color:'rgba(232,255,245,.6)', padding:'8px 20px',
+        fontFamily:"'Fredoka One',cursive", fontSize:14, cursor:'pointer' }}>
+        ← Go Back
+      </button>
+    </div>
+  );
+
   // ── Already completed: locked screen ──
   if (alreadyDone) return (
-    <AlreadyDoneScreen stars={prevStars} onBack={() => nav('/dashboard')} />
+    <AlreadyDoneScreen stars={prevStars} onBack={() => parentCourse ? nav(`/course/${parentCourse.id}`) : nav('/dashboard')} />
   );
 
   // ── Result screen after finishing ──
-  if (done && result) return (
-    <ResultScreen result={result} coins={coins} onBack={() => nav('/dashboard')} />
-  );
+  if (done && result) {
+    const goNext = () => {
+      if (!nextSession) { nav('/dashboard'); return; }
+      if (!isPremium && nextSession.order > 4) { nav('/pricing'); return; }
+      nav(nextSession.type === 'QUIZ' ? `/quiz/${nextSession.id}` : `/lesson/${nextSession.id}`);
+    };
+    const needsUpgrade = nextSession && !isPremium && nextSession.order > 4;
+    return (
+      <div style={{ position:'relative' }}>
+        <ResultScreen result={result} coins={coins}
+          onBack={() => parentCourse ? nav(`/course/${parentCourse.id}`) : nav('/dashboard')} />
+        {nextSession && (
+          <div style={{ position:'fixed', bottom:24, left:'50%', transform:'translateX(-50%)',
+            zIndex:400, display:'flex', flexDirection:'column', alignItems:'center', gap:8 }}>
+            {needsUpgrade && (
+              <div style={{ background:'rgba(255,215,0,.15)', border:'1.5px solid rgba(255,215,0,.5)',
+                borderRadius:12, padding:'6px 16px', color:'#FFD700',
+                fontFamily:"'Fredoka One',cursive", fontSize:13, textAlign:'center' }}>
+                Next session requires Premium
+              </div>
+            )}
+            <button onClick={goNext} style={{
+              background: needsUpgrade ? 'linear-gradient(135deg,#FFD700,#E8A800)' : `linear-gradient(180deg,#7ED957,#5BB832)`,
+              border: `3px solid ${needsUpgrade ? '#FFD700' : '#7ED957'}`,
+              borderRadius:16, color: needsUpgrade ? '#1A0E00' : '#1A3020',
+              fontFamily:"'Fredoka One',cursive", fontSize:18, padding:'13px 32px',
+              cursor:'pointer', boxShadow:`0 6px 0 ${needsUpgrade ? '#A07800' : '#3A8A1A'}`,
+              whiteSpace:'nowrap',
+            }}>
+              {needsUpgrade ? '👑 Upgrade to Continue' : `▶ Next: ${nextSession.title}`}
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   // ── Quiz in progress ──
   return (

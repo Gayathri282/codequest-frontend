@@ -2,7 +2,7 @@
 // Full lesson/session builder for any course
 // Supports: VIDEO | DOCUMENT | QUIZ | CODE | BOSS
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import api from '../../utils/api';
 import Btn from '../shared/Btn';
 import XpBar from '../shared/XpBar';
@@ -38,6 +38,134 @@ const lbl = {
   fontSize: 12, color: C.orange, fontWeight: 800,
   display: 'block', marginBottom: 5, letterSpacing: .4,
 };
+
+/* ── Video upload + URL field ── */
+function VideoUploadField({ videoUrl, onChange }) {
+  const fileRef   = useRef(null);
+  const [uploading, setUploading] = useState(false);
+  const [progress,  setProgress]  = useState(0);
+  const [uploadErr, setUploadErr] = useState('');
+
+  async function handleFile(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true); setUploadErr(''); setProgress(0);
+    try {
+      const fd = new FormData();
+      fd.append('video', file);
+      fd.append('title', file.name.replace(/\.[^.]+$/, ''));
+
+      // Use XMLHttpRequest so we can show real upload progress
+      const result = await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', `${import.meta.env.VITE_API_URL || ''}/api/video/upload`);
+        const token = localStorage.getItem('cq_token');
+        if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+        xhr.upload.onprogress = ev => {
+          if (ev.lengthComputable) setProgress(Math.round((ev.loaded / ev.total) * 100));
+        };
+        xhr.onload = () => {
+          try { resolve(JSON.parse(xhr.responseText)); }
+          catch (_) { reject(new Error('Upload failed')); }
+        };
+        xhr.onerror = () => reject(new Error('Network error'));
+        xhr.send(fd);
+      });
+
+      if (result.embedUrl) {
+        onChange(result.embedUrl);
+      } else {
+        setUploadErr(result.error || 'Upload failed — no embed URL returned');
+      }
+    } catch (err) {
+      setUploadErr(err.message || 'Upload failed');
+    } finally {
+      setUploading(false); setProgress(0);
+      e.target.value = '';
+    }
+  }
+
+  const hasBunny = videoUrl && videoUrl.includes('mediadelivery.net');
+
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <label style={lbl}>Video</label>
+
+      {/* Upload button */}
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
+        <button
+          type="button"
+          onClick={() => fileRef.current?.click()}
+          disabled={uploading}
+          style={{
+            background: uploading ? '#f0f0f0' : `${C.cyan}22`,
+            border: `2px solid ${uploading ? '#ccc' : C.cyan}`,
+            borderRadius: 12, padding: '8px 18px', cursor: uploading ? 'wait' : 'pointer',
+            fontFamily: "'Nunito', sans-serif", fontSize: 13, fontWeight: 700,
+            color: uploading ? C.muted : C.cyan, whiteSpace: 'nowrap',
+          }}>
+          {uploading ? `⏳ Uploading ${progress}%…` : '📤 Upload Video File'}
+        </button>
+        <span style={{ color: C.muted, fontSize: 12, fontWeight: 600 }}>
+          mp4 / mov / webm up to 2 GB
+        </span>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="video/mp4,video/quicktime,video/webm,video/avi,video/x-matroska"
+          style={{ display: 'none' }}
+          onChange={handleFile}
+        />
+      </div>
+
+      {/* Progress bar */}
+      {uploading && (
+        <div style={{ height: 8, background: '#E0F4FF', borderRadius: 6, marginBottom: 10, overflow: 'hidden' }}>
+          <div style={{
+            height: '100%', borderRadius: 6,
+            background: `linear-gradient(90deg,${C.cyan},${C.lime})`,
+            width: `${progress}%`, transition: 'width .3s',
+          }} />
+        </div>
+      )}
+
+      {uploadErr && (
+        <div style={{ color: C.red, fontSize: 12, marginBottom: 8, fontWeight: 700 }}>
+          ⚠️ {uploadErr}
+        </div>
+      )}
+
+      {/* Divider */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <div style={{ flex: 1, height: 1, background: '#D8EEFF' }} />
+        <span style={{ color: C.muted, fontSize: 11, fontWeight: 700 }}>OR PASTE URL</span>
+        <div style={{ flex: 1, height: 1, background: '#D8EEFF' }} />
+      </div>
+
+      {/* URL input */}
+      <input
+        style={inp}
+        placeholder="https://www.youtube.com/watch?v=...  or  https://iframe.mediadelivery.net/embed/..."
+        value={videoUrl}
+        onChange={e => onChange(e.target.value)}
+      />
+
+      {/* Preview / status */}
+      {videoUrl && (
+        <div style={{
+          marginTop: 8, padding: '6px 12px', borderRadius: 10,
+          background: hasBunny ? `${C.lime}18` : `${C.cyan}18`,
+          border: `1.5px solid ${hasBunny ? C.lime : C.cyan}44`,
+          fontSize: 11, color: hasBunny ? '#2a6a2a' : '#1a4a6a',
+          fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6,
+        }}>
+          {hasBunny ? '🐰 Bunny.net video ready' : '🔗 External URL set'}
+          <span style={{ fontWeight: 400, wordBreak: 'break-all' }}>{videoUrl}</span>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function LessonBuilder({ courseId, courseTitle = "Course", courseName, onEditQuiz }) {
   const [sessions, setSessions]   = useState([]);
@@ -217,14 +345,10 @@ export default function LessonBuilder({ courseId, courseTitle = "Course", course
           {/* VIDEO fields */}
           {(form.type === 'VIDEO' || form.type === 'BOSS') && (
             <>
-              <div style={{ marginBottom: 12 }}>
-                <label style={lbl}>Video URL (YouTube embed / Bunny.net / Vimeo embed)</label>
-                <input style={inp} placeholder="https://iframe.mediadelivery.net/embed/123/abc  or  https://www.youtube.com/embed/..."
-                  value={form.videoUrl} onChange={e => setForm(f => ({ ...f, videoUrl: e.target.value }))} />
-                <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>
-                  💡 Bunny.net format: <code>https://iframe.mediadelivery.net/embed/{"<libraryId>/<videoId>"}</code>
-                </div>
-              </div>
+              <VideoUploadField
+                videoUrl={form.videoUrl}
+                onChange={url => setForm(f => ({ ...f, videoUrl: url }))}
+              />
               <div style={{ marginBottom: 12 }}>
                 <label style={lbl}>Thumbnail Image URL (optional)</label>
                 <input style={inp} placeholder="https://your-cdn.com/thumb.jpg"

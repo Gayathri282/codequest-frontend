@@ -1,9 +1,10 @@
 // frontend/src/pages/LessonPage.jsx
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useSession }       from '../hooks/useSession';
 import { useProgress }      from '../hooks/useProgress';
 import { useCourseContext } from '../context/CourseContext';
+import { useAuth }          from '../context/AuthContext';
 import { setLastLesson }    from '../utils/storage';
 import Hud                  from '../components/shared/Hud';
 import Btn                  from '../components/shared/Btn';
@@ -12,7 +13,7 @@ import VideoPlayer          from '../components/lesson/VideoPlayer';
 import CodeEditor           from '../components/lesson/CodeEditor';
 import DocumentViewer       from '../components/lesson/DocumentViewer';
 
-const C = { orange:'#7ED957', cyan:'#00C8E8', lime:'#7ED957', yellow:'#FFD700', red:'#FF4757', teal:'#00C8A0' };
+const C = { orange:'#FF6B35', cyan:'#00C8E8', lime:'#7ED957', yellow:'#FFD700', red:'#FF4757', teal:'#00C8A0' };
 
 export default function LessonPage() {
   const { id } = useParams();
@@ -21,11 +22,27 @@ export default function LessonPage() {
   const { session, loading, error }                        = useSession(id);
   const { completeSession, completing, reward, clearReward } = useProgress();
   const { markSessionDone, courses }                         = useCourseContext();
-  const [doneError,   setDoneError]   = useState(null);
-  const [nextSession, setNextSession] = useState(null);
+  const { user }                                             = useAuth();
+  const isPremium = user?.plan === 'PREMIUM' || user?.plan === 'BASIC' || user?.role === 'ADMIN';
+  const currentCourse = courses.find(c => c.sessions?.some(s => s.id === id));
+  const freeLimit = currentCourse?.freeSessionCount ?? 4;
+  const [doneError,    setDoneError]    = useState(null);
+  const [nextSession,  setNextSession]  = useState(null);
+  const [canComplete,  setCanComplete]  = useState(true);   // false until 75% watched/read
+  const [earlyMsg,     setEarlyMsg]     = useState('');
+  const earlyMsgTimer = useRef(null);
 
   // Remember last visited lesson (in effect, not render body)
   useEffect(() => { if (id) setLastLesson(id); }, [id]);
+
+  // Gate the Done button for video and document sessions
+  useEffect(() => {
+    if (!session) return;
+    const needsGate = Boolean(session.videoUrl) ||
+      session.type === 'VIDEO' || session.type === 'BOSS' || session.type === 'DOCUMENT';
+    setCanComplete(!needsGate);
+    setEarlyMsg('');
+  }, [session?.id]);
 
   // Redirect quiz sessions to the dedicated quiz page
   useEffect(() => {
@@ -36,16 +53,20 @@ export default function LessonPage() {
     setDoneError(null);
     try {
       const result = await completeSession(id, 3);
-      if (result && !result.alreadyDone) {
-        markSessionDone(id);
-        // Find the next session in this course so the overlay can navigate to it
-        const course = courses.find(c => c.sessions?.some(s => s.id === id));
-        if (course) {
-          const sorted = [...(course.sessions || [])].sort((a, b) => a.order - b.order);
-          const idx    = sorted.findIndex(s => s.id === id);
-          setNextSession(sorted[idx + 1] ?? null);
-        }
+      markSessionDone(id);
+
+      // Find next session and navigate directly
+      const course = courses.find(c => c.sessions?.some(s => s.id === id));
+      let next = null;
+      if (course) {
+        const sorted = [...(course.sessions || [])].sort((a, b) => a.order - b.order);
+        const idx = sorted.findIndex(s => s.id === id);
+        next = sorted[idx + 1] ?? null;
       }
+
+      if (!next) { nav('/dashboard'); return; }
+      if (!isPremium && next.order > freeLimit) { nav('/pricing'); return; }
+      nav(next.type === 'QUIZ' ? `/quiz/${next.id}` : `/lesson/${next.id}`);
     } catch (err) {
       const msg = err.code === 'ECONNABORTED' || err.message?.includes('timeout')
         ? '⏱ Server took too long — is the backend running?'
@@ -54,29 +75,80 @@ export default function LessonPage() {
     }
   }
 
+  function handleMarkDoneGuarded() {
+    if (!canComplete) {
+      const isDoc = session?.type === 'DOCUMENT';
+      setEarlyMsg(isDoc
+        ? '📖 Tip: scroll through the content for the full lesson — but you can still mark done!'
+        : '🎬 Tip: finish watching the video for the full lesson — but you can still mark done!');
+      clearTimeout(earlyMsgTimer.current);
+      earlyMsgTimer.current = setTimeout(() => setEarlyMsg(''), 4000);
+    }
+    // Always proceed regardless
+    handleMarkDone();
+  }
+
   function goNext() {
     clearReward();
     setNextSession(null);
     if (!nextSession) { nav('/dashboard'); return; }
+    if (!isPremium && nextSession.order > freeLimit) { nav('/pricing'); return; }
     nav(nextSession.type === 'QUIZ' ? `/quiz/${nextSession.id}` : `/lesson/${nextSession.id}`);
+  }
+
+  function handleUpgrade() {
+    nav('/pricing');
   }
 
   if (loading) return <LoadingScreen />;
 
-  if (error) return (
-    <div style={{ minHeight:'100vh', background:'linear-gradient(160deg,#FFF9E6,#E8F4FF)',
-      display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
-      gap:16, padding:24, fontFamily:"'Quicksand',sans-serif" }}>
-      <div style={{ fontSize:72 }}>🔒</div>
-      <div style={{ fontFamily:"'Fredoka One',cursive", fontSize:26, color:C.orange, textAlign:'center' }}>{error}</div>
-      {error.includes('Upgrade') && (
-        <Btn onClick={() => nav('/pricing')} color={C.orange} style={{ fontSize:18 }}>
-          🚀 Upgrade Plan →
-        </Btn>
-      )}
-      <Btn onClick={() => nav('/dashboard')} color={C.cyan} sm>← Back to Dashboard</Btn>
-    </div>
-  );
+  if (error) {
+    const isPlanError = error.includes('Upgrade') || error.includes('Premium') || error.includes('premium');
+    return (
+      <div style={{ minHeight:'100vh',
+        background:'radial-gradient(ellipse at 50% 20%,#0D3B22,#041A0E)',
+        display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
+        gap:20, padding:24, fontFamily:"'Quicksand',sans-serif" }}>
+        {isPlanError ? (
+          <>
+            <div style={{ fontSize:80 }}>👑</div>
+            <div style={{ fontFamily:"'Fredoka One',cursive", fontSize:30, color:'#FFD700',
+              textAlign:'center', maxWidth:380 }}>
+              This lesson is Premium only
+            </div>
+            <div style={{ color:'rgba(232,255,245,.7)', fontSize:15, textAlign:'center', maxWidth:340, fontWeight:600 }}>
+              Unlock all sessions, live IDE, quizzes and more for just ₹1,499 / month
+            </div>
+            <div style={{ display:'flex', gap:12, flexWrap:'wrap', justifyContent:'center', marginTop:8 }}>
+              {['All sessions unlocked','Live code IDE','Quizzes & boss levels','Certificates'].map(f => (
+                <span key={f} style={{ background:'rgba(255,215,0,.12)', border:'1px solid rgba(255,215,0,.4)',
+                  borderRadius:50, padding:'4px 14px', color:'#FFD700', fontSize:13, fontWeight:700 }}>
+                  ✓ {f}
+                </span>
+              ))}
+            </div>
+            <button onClick={handleUpgrade}
+              style={{ background:'linear-gradient(135deg,#FFD700,#E8A800)',
+                border:'3px solid #FFD700', borderRadius:16, color:'#1A0E00',
+                fontFamily:"'Fredoka One',cursive", fontSize:20, padding:'14px 36px',
+                cursor:'pointer', boxShadow:'0 6px 0 #A07800', marginTop:8 }}>
+              👑 Upgrade to Premium →
+            </button>
+            <Btn onClick={() => nav(-1)} color={C.cyan} textColor='#041A0E' sm>
+              ← Go Back
+            </Btn>
+          </>
+        ) : (
+          <>
+            <div style={{ fontSize:72 }}>🔒</div>
+            <div style={{ fontFamily:"'Fredoka One',cursive", fontSize:26, color:C.orange,
+              textAlign:'center' }}>{error}</div>
+            <Btn onClick={() => nav('/dashboard')} color={C.cyan} sm>← Back to Dashboard</Btn>
+          </>
+        )}
+      </div>
+    );
+  }
 
   const hasVideo = Boolean(session?.videoUrl) || session?.type === 'VIDEO' || session?.type === 'BOSS';
   const hasIDE   = Boolean(session?.hasIde)   || session?.type === 'CODE'  || session?.type === 'BOSS';
@@ -175,18 +247,26 @@ export default function LessonPage() {
                   fontFamily:"'Fredoka One',cursive", fontSize:15, padding:'10px 20px', cursor:'pointer' }}>
                 🗺️ Map
               </button>
-              <button onClick={goNext} style={{
-                background: nextSession
-                  ? `linear-gradient(180deg,${C.lime},#5BB832)`
-                  : `linear-gradient(180deg,${C.teal},#008B6E)`,
-                border:`3px solid ${nextSession ? C.lime : C.teal}`,
-                borderRadius:16, color: nextSession ? '#1A3020' : '#fff',
-                fontFamily:"'Fredoka One',cursive", fontSize:17, padding:'12px 26px',
-                cursor:'pointer',
-                boxShadow:`0 6px 0 ${nextSession ? '#3A8A1A' : '#006B52'}`,
-              }}>
-                {nextSession ? `▶ Next: ${nextSession.title}` : '🏁 Finish Course!'}
-              </button>
+              {(() => {
+                const needsUpgrade = nextSession && !isPremium && nextSession.order > freeLimit;
+                const bg = needsUpgrade ? `linear-gradient(180deg,#FFD700,#E8A800)`
+                  : nextSession ? `linear-gradient(180deg,${C.lime},#5BB832)`
+                  : `linear-gradient(180deg,${C.teal},#008B6E)`;
+                const border = needsUpgrade ? '#FFD700' : nextSession ? C.lime : C.teal;
+                const color  = needsUpgrade ? '#1A0E00' : nextSession ? '#1A3020' : '#fff';
+                const shadow = needsUpgrade ? '#A07800' : nextSession ? '#3A8A1A' : '#006B52';
+                return (
+                  <button onClick={goNext} style={{
+                    background:bg, border:`3px solid ${border}`, borderRadius:16, color,
+                    fontFamily:"'Fredoka One',cursive", fontSize:17, padding:'12px 26px',
+                    cursor:'pointer', boxShadow:`0 6px 0 ${shadow}`,
+                  }}>
+                    {needsUpgrade ? '👑 Upgrade to Continue'
+                      : nextSession ? `▶ Next: ${nextSession.title}`
+                      : '🏁 Finish Course!'}
+                  </button>
+                );
+              })()}
             </div>
           </div>
         </div>
@@ -224,11 +304,24 @@ export default function LessonPage() {
             fontFamily:"'Fredoka One',cursive", color:'#B8960A', fontSize:14 }}>
             🪙 {session?.coinsReward}
           </span>
-          <Btn onClick={handleMarkDone} disabled={completing} color={C.lime} textColor='#1A3020' sm
-            style={{ fontWeight:700 }}>
+          <Btn
+            onClick={handleMarkDoneGuarded}
+            disabled={completing}
+            color={C.lime}
+            textColor='#1A3020'
+            sm
+            style={{ fontWeight:700 }}
+          >
             {completing ? '⏳' : '✓ Done'}
           </Btn>
         </div>
+        {earlyMsg && (
+          <div style={{ width:'100%', background:'rgba(255,215,0,.12)', border:'2px solid rgba(255,215,0,.5)',
+            borderRadius:10, padding:'6px 14px', color:'#B8960A', fontSize:12, fontWeight:700,
+            marginTop:6, flexShrink:0 }}>
+            {earlyMsg}
+          </div>
+        )}
         {doneError && (
           <div style={{ width:'100%', background:`${C.red}18`, border:`2px solid ${C.red}55`,
             borderRadius:10, padding:'6px 14px', color:C.red, fontSize:12, fontWeight:700,
@@ -243,7 +336,7 @@ export default function LessonPage() {
 
         {/* DOCUMENT */}
         {session?.type === 'DOCUMENT' && (
-          <DocumentViewer title={session.title} content={session.docContent} />
+          <DocumentViewer title={session.title} content={session.docContent} onCanComplete={() => setCanComplete(true)} />
         )}
 
         {/* VIDEO or BOSS — left side video, optional right side IDE */}
@@ -259,6 +352,8 @@ export default function LessonPage() {
                 videoUrl={session?.videoUrl}
                 missionText={session?.missionText}
                 docContent={session?.docContent}
+                fullView={!hasIDE}
+                onCanComplete={() => setCanComplete(true)}
               />
             </div>
             {hasIDE && (
