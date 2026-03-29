@@ -23,13 +23,14 @@ const PIP_LINES = [
     "Ready to start your quest? 🌿",
   ],
   [
-    "Every hero needs a buddy!",
-    "Pick the one that speaks to your soul. 🔥",
+    "Every hero needs a name and a buddy!",
+    "What should I call you? 🌟",
   ],
   [
-    "AMAZING choice!",
-    "Your quest begins NOW.",
-    "Let's go earn some XP! ⚡",
+    "Here's how CodeQuest works! 🗺️",
+    "Watch the video 🎬 → code it yourself 💻",
+    "Hit ▶ Run to see it live in the browser!",
+    "Complete missions → earn XP & coins 🪙",
   ],
 ];
 
@@ -83,8 +84,9 @@ function TypingText({ lines, onDone }) {
 export default function OnboardingPage() {
   const { user, refreshUser } = useAuth();
   const nav = useNavigate();
-  const [step, setStep]         = useState(0);   // 0 = welcome, 1 = avatar, 2 = ready
+  const [step, setStep]         = useState(0);   // 0 = welcome, 1 = avatar+name, 2 = ready
   const [avatar, setAvatar]     = useState(user?.avatarEmoji || '🐸');
+  const [displayName, setDisplayName] = useState(user?.displayName || '');
   const [canNext, setCanNext]   = useState(false);
   const [saving, setSaving]     = useState(false);
   const [pipBounce, setPipBounce] = useState(false);
@@ -107,10 +109,12 @@ export default function OnboardingPage() {
 
   async function handleNext() {
     if (step === 1) {
-      // Save avatar immediately so it's set as their default
+      // Save avatar + name so it's set as their default
       setSaving(true);
       try {
-        await api.patch('/users/me', { avatarEmoji: avatar });
+        const patch = { avatarEmoji: avatar };
+        if (displayName.trim()) patch.displayName = displayName.trim();
+        await api.patch('/users/me', patch);
         await refreshUser();
       } catch (_) {}
       setSaving(false);
@@ -208,15 +212,26 @@ export default function OnboardingPage() {
             {stepLabel}
           </div>
 
-          {/* Pip */}
-          <div style={{ textAlign:'center', marginBottom:8 }}>
+          {/* Hero emoji — Pip on step 0, selected avatar on step 1, both on step 2 */}
+          <div style={{ textAlign:'center', marginBottom:8, display:'flex', alignItems:'center', justifyContent:'center', gap:8 }}>
+            {step === 2 && (
+              <div style={{
+                fontSize:54, display:'inline-block',
+                animation: pipBounce ? 'cq-bob 2s ease-in-out infinite' : 'none',
+                filter:'drop-shadow(0 0 12px rgba(126,217,87,.5))',
+              }}>🐸</div>
+            )}
             <div style={{
-              display:'inline-block', fontSize:pipSize,
+              display:'inline-block',
+              fontSize: step === 1 ? 80 : step === 2 ? 64 : pipSize,
               animation: pipBounce ? 'cq-bob 2s ease-in-out infinite' : 'none',
+              animationDelay: step === 2 ? '.3s' : '0s',
               transition: 'font-size .3s',
-              filter:'drop-shadow(0 0 18px rgba(126,217,87,.5))',
+              filter: step === 1
+                ? 'drop-shadow(0 0 22px rgba(255,215,0,.7))'
+                : 'drop-shadow(0 0 18px rgba(126,217,87,.5))',
             }}>
-              🐸
+              {step === 0 ? '🐸' : avatar}
             </div>
           </div>
 
@@ -240,16 +255,36 @@ export default function OnboardingPage() {
             />
           </div>
 
-          {/* ── Step 1: Avatar picker ── */}
+          {/* ── Step 1: Name + Avatar picker ── */}
           {step === 1 && (
             <div style={{ marginBottom:24, animation:'cq-pop .4s ease both' }}>
+              {/* Name input */}
+              <div style={{ marginBottom:16 }}>
+                <div style={{ fontFamily:"'Fredoka One',cursive", color:T.gold,
+                  fontSize:13, marginBottom:6 }}>
+                  What's your name, adventurer? ⚔️
+                </div>
+                <input
+                  type="text"
+                  maxLength={30}
+                  placeholder="e.g. Alex the Brave"
+                  value={displayName}
+                  onChange={e => setDisplayName(e.target.value)}
+                  style={{
+                    width:'100%', padding:'10px 14px', borderRadius:12, boxSizing:'border-box',
+                    background:'rgba(0,0,0,.3)', border:`2px solid rgba(126,217,87,.4)`,
+                    color:T.white, fontSize:14, fontFamily:"'Quicksand',sans-serif", fontWeight:700,
+                    outline:'none',
+                  }}
+                />
+              </div>
               <div style={{ fontFamily:"'Fredoka One',cursive", color:T.gold,
-                fontSize:15, textAlign:'center', marginBottom:14 }}>
+                fontSize:13, marginBottom:10 }}>
                 Pick your adventure buddy
               </div>
               <div style={{
                 display:'grid', gridTemplateColumns:'repeat(5, 1fr)', gap:10,
-                maxHeight:180, overflowY:'auto', paddingRight:4,
+                maxHeight:160, overflowY:'auto', paddingRight:4,
               }}>
                 {AVATARS.map(em => (
                   <div
@@ -271,40 +306,33 @@ export default function OnboardingPage() {
                   </div>
                 ))}
               </div>
-              {/* Preview */}
-              <div style={{ textAlign:'center', marginTop:16 }}>
-                <span style={{
-                  fontSize:12, fontWeight:700, color:'rgba(232,255,245,.5)',
-                  letterSpacing:1, textTransform:'uppercase',
-                }}>Your buddy: </span>
-                <span style={{ fontSize:28, animation:'cq-bob 2s ease-in-out infinite',
-                  display:'inline-block', filter:'drop-shadow(0 0 8px rgba(255,215,0,.6))' }}>
-                  {avatar}
-                </span>
-              </div>
             </div>
           )}
 
-          {/* ── Step 2: Confetti burst ── */}
+          {/* ── Step 2: How it works ── */}
           {step === 2 && (
-            <div style={{ textAlign:'center', marginBottom:24, animation:'cq-pop .4s ease both' }}>
-              {['🎉','⭐','🌟','✨','🏆','🎊','💫'].map((e,i) => (
-                <span key={i} style={{
-                  fontSize:22+((i*4)%12), display:'inline-block',
-                  margin:'0 3px',
-                  animation:`cq-bob ${1.4+i*.2}s ease-in-out infinite`,
-                  animationDelay:`${i*.12}s`,
-                }}>{e}</span>
+            <div style={{ marginBottom:20, animation:'cq-pop .4s ease both' }}>
+              <div style={{ fontFamily:"'Fredoka One',cursive", color:T.gold,
+                fontSize:14, textAlign:'center', marginBottom:12 }}>
+                Ready, {displayName.trim() || user?.displayName || user?.username || 'Explorer'}! 🎉
+              </div>
+              {[
+                { icon:'🎬', label:'Watch the video lesson' },
+                { icon:'💻', label:'Write code in the editor' },
+                { icon:'▶️', label:'Hit Run — see it live!' },
+                { icon:'📋', label:'Complete missions for XP' },
+              ].map(({ icon, label }, i) => (
+                <div key={i} style={{
+                  display:'flex', alignItems:'center', gap:12,
+                  background:'rgba(255,255,255,.06)', borderRadius:12,
+                  padding:'9px 14px', marginBottom:8,
+                  border:'1px solid rgba(126,217,87,.15)',
+                  animation:`cq-pop .3s ${i*.07}s ease both`,
+                }}>
+                  <span style={{ fontSize:22, flexShrink:0 }}>{icon}</span>
+                  <span style={{ color:T.white, fontSize:13, fontWeight:700 }}>{label}</span>
+                </div>
               ))}
-              <div style={{
-                marginTop:16, fontFamily:"'Fredoka One',cursive",
-                fontSize:22, color:T.gold,
-              }}>
-                {user?.displayName || user?.username || 'Explorer'}, you're ready!
-              </div>
-              <div style={{ fontSize:36, marginTop:8, animation:'cq-bob 1.8s ease-in-out infinite' }}>
-                {avatar}
-              </div>
             </div>
           )}
 

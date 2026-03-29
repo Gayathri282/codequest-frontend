@@ -13,8 +13,9 @@ export function AuthProvider({ children }) {
       api.get('/auth/me')
         .then(res => setUser(res.data))
         .catch(err => {
-          // Only clear token on 401 (invalid/expired). 429 = rate limit, keep the token.
-          if (err.response?.status !== 429) localStorage.removeItem('cq_token');
+          // Only clear token on 401 (truly invalid/expired token).
+          // Keep it on 429 (rate limit), 5xx (server/DB down), or network errors.
+          if (err.response?.status === 401) localStorage.removeItem('cq_token');
         })
         .finally(() => setLoading(false));
     } else {

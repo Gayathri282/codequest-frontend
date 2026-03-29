@@ -37,31 +37,43 @@ function loadYTApi(cb) {
 }
 
 /* ─── root component ──────────────────────────────────── */
-export default function VideoPlayer({ videoUrl, missionText, docContent, fullView = false, onCanComplete }) {
+export default function VideoPlayer({ videoUrl, missionText, docContent, fullView = false, onCanComplete, onProgress }) {
   return isYouTube(videoUrl)
-    ? <YTPlayer    url={videoUrl} missionText={missionText} docContent={docContent} fullView={fullView} onCanComplete={onCanComplete} />
-    : <EmbedPlayer url={videoUrl} missionText={missionText} docContent={docContent} fullView={fullView} onCanComplete={onCanComplete} />;
+    ? <YTPlayer    url={videoUrl} missionText={missionText} docContent={docContent} fullView={fullView} onCanComplete={onCanComplete} onProgress={onProgress} />
+    : <EmbedPlayer url={videoUrl} missionText={missionText} docContent={docContent} fullView={fullView} onCanComplete={onCanComplete} onProgress={onProgress} />;
 }
 
 /* ─── YouTube player ──────────────────────────────────── */
-function YTPlayer({ url, missionText, docContent, fullView, onCanComplete }) {
+function YTPlayer({ url, missionText, docContent, fullView, onCanComplete, onProgress }) {
   const containerRef   = useRef(null);
   const playerRef      = useRef(null);
   const wrapperRef     = useRef(null);
-  const firedRef       = useRef(false);       // track if we already called onCanComplete
+  const firedRef       = useRef(false);
   const onCompleteRef  = useRef(onCanComplete);
+  const onProgressRef  = useRef(onProgress);
+  const maxSecondsRef  = useRef(0);  // highest position ever reached (never decreases)
 
   const [ready,    setReady]    = useState(false);
   const [playing,  setPlaying]  = useState(false);
   const [speed,    setSpeed]    = useState(1);
   const [ccOn,     setCcOn]     = useState(false);
   const [fsOn,     setFsOn]     = useState(false);
-  const [watchPct, setWatchPct] = useState(0);  // 0–100 display
+  const [watchPct, setWatchPct] = useState(0);
 
   const videoId = extractYTId(url);
 
-  // Keep callback ref in sync without re-running effects
   useEffect(() => { onCompleteRef.current = onCanComplete; }, [onCanComplete]);
+  useEffect(() => { onProgressRef.current = onProgress; }, [onProgress]);
+
+  function reportProgress() {
+    try {
+      const dur = playerRef.current?.getDuration?.() ?? 0;
+      const cur = playerRef.current?.getCurrentTime?.() ?? 0;
+      if (dur > 0 && onProgressRef.current) {
+        onProgressRef.current(Math.round(cur), Math.round(dur), Math.round(maxSecondsRef.current));
+      }
+    } catch (_) {}
+  }
 
   // Build / rebuild player when videoId changes
   useEffect(() => {
@@ -85,25 +97,28 @@ function YTPlayer({ url, missionText, docContent, fullView, onCanComplete }) {
         events: {
           onReady: () => setReady(true),
           onStateChange: (e) => {
+            const isPaused = e.data === 2;
+            const isEnded  = e.data === 0;
             setPlaying(e.data === 1 || e.data === 3);
-            // 0 = ENDED — video ran all the way through
-            if (e.data === 0 && !firedRef.current) {
+
+            if (isEnded && !firedRef.current) {
               firedRef.current = true;
               setWatchPct(100);
               onCompleteRef.current?.();
-              return;
             }
-            // Any state change (seek, pause, resume) — immediately check position
             try {
               const dur = playerRef.current?.getDuration?.() ?? 0;
               const cur = playerRef.current?.getCurrentTime?.() ?? 0;
               if (dur > 0) {
+                maxSecondsRef.current = Math.max(maxSecondsRef.current, cur);
                 const pct = cur / dur;
                 setWatchPct(Math.min(100, Math.round(pct * 100)));
                 if (pct >= 0.75 && !firedRef.current) {
                   firedRef.current = true;
                   onCompleteRef.current?.();
                 }
+                // Report progress on pause or end so admin sees last exit point
+                if (isPaused || isEnded) reportProgress();
               }
             } catch (_) {}
           },
@@ -115,13 +130,14 @@ function YTPlayer({ url, missionText, docContent, fullView, onCanComplete }) {
     loadYTApi(init);
 
     return () => {
+      reportProgress(); // report where student was when they left
       try { playerRef.current?.destroy(); } catch (_) {}
       playerRef.current = null;
       if (containerRef.current) containerRef.current.innerHTML = '';
     };
-  }, [videoId]);
+  }, [videoId]); // eslint-disable-line
 
-  // Poll seek-bar position every 500 ms — works correctly at any playback speed
+  // Poll seek-bar position every 500 ms
   useEffect(() => {
     if (!ready) return;
     function checkProgress() {
@@ -129,6 +145,7 @@ function YTPlayer({ url, missionText, docContent, fullView, onCanComplete }) {
         const dur = playerRef.current?.getDuration?.() ?? 0;
         const cur = playerRef.current?.getCurrentTime?.() ?? 0;
         if (dur > 0) {
+          maxSecondsRef.current = Math.max(maxSecondsRef.current, cur);
           const pct = cur / dur;
           setWatchPct(Math.min(100, Math.round(pct * 100)));
           if (pct >= 0.75 && !firedRef.current) {
@@ -187,9 +204,10 @@ function YTPlayer({ url, missionText, docContent, fullView, onCanComplete }) {
       >
         <div style={{ flex:1, position:'relative', minHeight:0 }}>
           <div ref={containerRef} style={{ width:'100%', height:'100%' }} />
-          {/* Right-click blocker only — pointerEvents:none so seek bar works normally */}
+          {/* Right-click blocker — pointerEvents:auto blocks context menu on the video area.
+              All playback controls are external (YT API buttons), so blocking clicks here is safe. */}
           <div
-            style={{ position:'absolute', inset:0, zIndex:2, pointerEvents:'none' }}
+            style={{ position:'absolute', inset:0, zIndex:2, pointerEvents:'auto', cursor:'default' }}
             onContextMenu={e => e.preventDefault()}
           />
           {!ready && (
@@ -244,23 +262,41 @@ function YTPlayer({ url, missionText, docContent, fullView, onCanComplete }) {
           </button>
         </div>
       </div>
-      <Mission text={missionText} doc={docContent} fullView={fullView} />
+      {missionText && <Mission text={missionText} doc={docContent} fullView={fullView} />}
     </div>
   );
 }
 
 /* ─── Generic iframe player (Bunny, Vimeo, etc.) ─────── */
-function EmbedPlayer({ url, missionText, docContent, fullView, onCanComplete }) {
+function EmbedPlayer({ url, missionText, docContent, fullView, onCanComplete, onProgress }) {
   const wrapperRef    = useRef(null);
   const iframeRef     = useRef(null);
   const firedRef      = useRef(false);
   const onCompleteRef = useRef(onCanComplete);
-  const gotMsgRef     = useRef(false);   // true once we receive a real timeupdate postMessage
+  const onProgressRef = useRef(onProgress);
+  const gotMsgRef     = useRef(false);
+  const maxSecondsRef = useRef(0);
+  const lastCurRef    = useRef(0);
+  const lastDurRef    = useRef(0);
   const [fsOn,      setFsOn]      = useState(false);
   const [embedPct,  setEmbedPct]  = useState(0);
   const [fallbackPct, setFbPct]   = useState(0);
 
   useEffect(() => { onCompleteRef.current = onCanComplete; }, [onCanComplete]);
+  useEffect(() => { onProgressRef.current = onProgress; }, [onProgress]);
+
+  // Report on unmount
+  useEffect(() => {
+    return () => {
+      if (lastDurRef.current > 0 && onProgressRef.current) {
+        onProgressRef.current(
+          Math.round(lastCurRef.current),
+          Math.round(lastDurRef.current),
+          Math.round(maxSecondsRef.current),
+        );
+      }
+    };
+  }, []);
 
   function fire() {
     if (firedRef.current) return;
@@ -297,6 +333,9 @@ function EmbedPlayer({ url, missionText, docContent, fullView, onCanComplete }) 
 
         if (dur > 0) {
           gotMsgRef.current = true;
+          lastCurRef.current = cur;
+          lastDurRef.current = dur;
+          maxSecondsRef.current = Math.max(maxSecondsRef.current, cur);
           const pct = cur / dur;
           setEmbedPct(Math.min(100, Math.round(pct * 100)));
           if (pct >= 0.75) fire();
@@ -354,7 +393,8 @@ function EmbedPlayer({ url, missionText, docContent, fullView, onCanComplete }) 
               : { flexShrink:0, aspectRatio:'16/9' }),
         }}
       >
-        <div style={{ flex:1, position:'relative', minHeight:0 }}>
+        <div style={{ flex:1, position:'relative', minHeight:0 }}
+          onContextMenu={e => e.preventDefault()}>
           {url ? (
             <iframe
               ref={iframeRef}
@@ -362,6 +402,7 @@ function EmbedPlayer({ url, missionText, docContent, fullView, onCanComplete }) 
               style={{ width:'100%', height:'100%', border:'none', display:'block' }}
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
               title="Lesson video"
+              onContextMenu={e => e.preventDefault()}
             />
           ) : (
             <div style={{ position:'absolute', inset:0, display:'flex', flexDirection:'column',
@@ -403,7 +444,7 @@ function EmbedPlayer({ url, missionText, docContent, fullView, onCanComplete }) 
           </div>
         )}
       </div>
-      <Mission text={missionText} doc={docContent} fullView={fullView} />
+      {missionText && <Mission text={missionText} doc={docContent} fullView={fullView} />}
     </div>
   );
 }

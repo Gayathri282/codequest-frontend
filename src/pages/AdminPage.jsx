@@ -454,13 +454,15 @@ function LecturesTab({ courses }) {
    STUDENTS TAB
 ══════════════════════════════════════════════════ */
 function StudentsTab() {
-  const [students, setStudents] = useState([]);
-  const [loading,  setLoading]  = useState(true);
-  const [search,   setSearch]   = useState('');
-  const [page,     setPage]     = useState(1);
-  const [total,    setTotal]    = useState(0);
-  const [pages,    setPages]    = useState(1);
-  const [selected, setSelected] = useState(null); // student for progress modal
+  const [students,       setStudents]       = useState([]);
+  const [loading,        setLoading]        = useState(true);
+  const [search,         setSearch]         = useState('');
+  const [page,           setPage]           = useState(1);
+  const [total,          setTotal]          = useState(0);
+  const [pages,          setPages]          = useState(1);
+  const [selected,       setSelected]       = useState(null); // student for progress modal
+  const [studentProgress, setStudentProgress] = useState(null); // daily completions for modal chart
+  const [progressLoading, setProgressLoading] = useState(false);
 
   async function load(p = 1, q = search) {
     setLoading(true);
@@ -474,6 +476,17 @@ function StudentsTab() {
   }
 
   useEffect(() => { load(); }, []);
+
+  async function openStudent(s) {
+    setSelected(s);
+    setStudentProgress(null);
+    setProgressLoading(true);
+    try {
+      const r = await api.get(`/admin/students/${s.id}/progress`);
+      setStudentProgress(r.data);
+    } catch (_) { setStudentProgress([]); }
+    finally { setProgressLoading(false); }
+  }
 
   async function banStudent(id) {
     if (!confirm('Ban this student?')) return;
@@ -497,21 +510,22 @@ function StudentsTab() {
       </div>
 
       {selected && (
-        <Modal onClose={() => setSelected(null)} maxWidth={600}>
+        <Modal onClose={() => setSelected(null)} maxWidth={640}>
           <div style={{ fontFamily:FONT_HEAD, fontSize:22, color:C.orange, marginBottom:16 }}>
             {selected.avatarEmoji||'🏃'} {selected.displayName||selected.username}
           </div>
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14, marginBottom:16 }}>
             {[
-              { label:'Email',    value:selected.email },
-              { label:'Age',      value:`${selected.age||'—'} years` },
-              { label:'Plan',     value:selected.plan },
-              { label:'Level',    value:`Level ${selected.level}` },
-              { label:'XP',       value:`${selected.xp} XP` },
-              { label:'Coins',    value:`🪙 ${selected.coins}` },
-              { label:'Streak',   value:`🔥 ${selected.streakDays} days` },
-              { label:'Joined',   value:new Date(selected.createdAt).toLocaleDateString('en-IN') },
-              { label:'Last seen',value:timeAgo(selected.lastActiveAt) },
+              { label:'Email',      value:selected.email },
+              { label:'Age',        value:`${selected.age||'—'} years` },
+              { label:'Plan',       value:selected.plan },
+              { label:'Level',      value:`Level ${selected.level}` },
+              { label:'XP',         value:`${selected.xp} XP` },
+              { label:'Coins',      value:`🪙 ${selected.coins}` },
+              { label:'Streak',     value:`🔥 ${selected.streakDays} days` },
+              { label:'Completed',  value:`✅ ${selected.completedSessions || 0} sessions` },
+              { label:'Joined',     value:new Date(selected.createdAt).toLocaleDateString('en-IN') },
+              { label:'Last seen',  value:timeAgo(selected.lastActiveAt) },
             ].map(r => (
               <div key={r.label} style={{ background:C.light, borderRadius:10, padding:'10px 14px' }}>
                 <div style={{ color:C.muted, fontSize:11 }}>{r.label}</div>
@@ -519,6 +533,20 @@ function StudentsTab() {
               </div>
             ))}
           </div>
+
+          {/* Activity chart */}
+          <div style={{ background:`${C.cyan}14`, border:`2px solid ${C.cyan}44`,
+            borderRadius:14, padding:'14px 16px', marginBottom:16 }}>
+            <div style={{ fontFamily:FONT_HEAD, color:C.cyan, fontSize:15, marginBottom:10 }}>
+              📅 Activity — Last 14 Days
+            </div>
+            {progressLoading ? (
+              <div style={{ textAlign:'center', color:C.muted, padding:20 }}>⏳ Loading…</div>
+            ) : (
+              <MiniBarChart completions={studentProgress || []} barColor={C.cyan} days={14} />
+            )}
+          </div>
+
           <div style={{ display:'flex', gap:10 }}>
             <Btn onClick={() => setSelected(null)} color="#EEE" textColor={C.muted} sm>Close</Btn>
             <Btn onClick={() => { banStudent(selected.id); setSelected(null); }} color="#FFEEEE" textColor={C.red} sm>
@@ -533,8 +561,8 @@ function StudentsTab() {
           <div style={{ overflowX:'auto' }}>
             <table style={{ width:'100%', borderCollapse:'separate', borderSpacing:'0 8px', minWidth:700 }}>
               <thead>
-                <tr>{['Student','Age','Level','XP','Streak','Plan','Last Seen','Actions'].map((h,hi)=>(
-                  <th key={h} style={{ color:[C.cyan,C.purple,C.orange,C.lime,C.orange,C.pink,C.muted,C.red][hi]||C.muted,
+                <tr>{['Student','Age','Level','XP','✅ Done','Plan','Last Seen','Actions'].map((h,hi)=>(
+                  <th key={h} style={{ color:[C.cyan,C.purple,C.orange,C.lime,C.lime,C.pink,C.muted,C.red][hi]||C.muted,
                     fontSize:12, textAlign:'left', padding:'8px 14px', fontFamily:FONT_BODY, fontWeight:800 }}>{h}</th>
                 ))}</tr>
               </thead>
@@ -553,11 +581,12 @@ function StudentsTab() {
                       <span style={{ fontFamily:FONT_HEAD, color:C.cyan }}>⚡{s.level}</span>,
                       <span style={{ fontFamily:FONT_HEAD, color:C.orange }}>⭐{s.xp}</span>,
                       <span style={{ fontFamily:FONT_HEAD, color:C.orange }}>🔥{s.streakDays}d</span>,
+                      <span style={{ fontFamily:FONT_HEAD, color:C.lime }}>✅{s.completedSessions||0}</span>,
                       <span style={{ background:`${PLAN_COLOR[s.plan]}22`, border:`1.5px solid ${PLAN_COLOR[s.plan]}`,
                         borderRadius:50, padding:'2px 10px', color:PLAN_COLOR[s.plan], fontSize:12 }}>{s.plan}</span>,
                       <span style={{ color:C.muted, fontSize:12 }}>{timeAgo(s.lastActiveAt)}</span>,
                       <div style={{ display:'flex', gap:5 }}>
-                        <Btn onClick={() => setSelected(s)} color="#EEF8FF" textColor={C.cyan} sm>👁</Btn>
+                        <Btn onClick={() => openStudent(s)} color="#EEF8FF" textColor={C.cyan} sm>👁</Btn>
                         <Btn onClick={() => banStudent(s.id)} color="#FFEEEE" textColor={C.red} sm>Ban</Btn>
                       </div>,
                     ].map((cell,i)=>(
@@ -565,8 +594,8 @@ function StudentsTab() {
                         padding:'12px 14px',
                         borderTop:`3px solid ${C.border}`, borderBottom:`3px solid ${C.border}`,
                         borderLeft: i===0 ? `3px solid ${C.cyan}` : 'none',
-                        borderRight: i===7 ? `3px solid ${C.border}` : 'none',
-                        borderRadius: i===0 ? '16px 0 0 16px' : i===7 ? '0 16px 16px 0' : 0,
+                        borderRight: i===8 ? `3px solid ${C.border}` : 'none',
+                        borderRadius: i===0 ? '16px 0 0 16px' : i===8 ? '0 16px 16px 0' : 0,
                       }}>{cell}</td>
                     ))}
                   </tr>
@@ -667,6 +696,54 @@ function PaymentsTab() {
   );
 }
 
+/* ─── Mini bar chart used in Analytics + Student modal ─── */
+function MiniBarChart({ completions, barColor = '#00C8E8', labelColor = '#5A8A70', days = 14 }) {
+  const today = new Date();
+  const dayList = Array.from({ length: days }, (_, i) => {
+    const d = new Date(today);
+    d.setDate(d.getDate() - (days - 1 - i));
+    return d;
+  });
+  // completions: array of objects with { completedAt, _count? } — sum _count if present, else count records
+  const counts = dayList.map(d =>
+    (completions || [])
+      .filter(c => c.completedAt && new Date(c.completedAt).toDateString() === d.toDateString())
+      .reduce((sum, c) => sum + (c._count || 1), 0)
+  );
+  const maxCount = Math.max(...counts, 1);
+  const W = Math.min(days * 28, 560), H = 80, BAR_W = Math.floor(W / days) - 4;
+  const GAP = (W - BAR_W * days) / (days + 1);
+
+  return (
+    <svg width={W} height={H + 24} style={{ display:'block', margin:'0 auto', overflow:'visible' }}>
+      {counts.map((count, i) => {
+        const barH = Math.max((count / maxCount) * H, count > 0 ? 6 : 2);
+        const x = GAP + i * (BAR_W + GAP);
+        const y = H - (count > 0 ? barH : 2);
+        const isToday = i === days - 1;
+        const showLabel = days <= 14 || i % 2 === 0;
+        const label = dayList[i].toLocaleDateString('en-US', { month:'numeric', day:'numeric' });
+        return (
+          <g key={i}>
+            <rect x={x} y={y} width={BAR_W} height={barH}
+              fill={count > 0 ? (isToday ? C.orange : barColor) : 'rgba(0,0,0,.08)'}
+              rx={3} />
+            {count > 0 && (
+              <text x={x + BAR_W / 2} y={y - 4} textAnchor="middle"
+                fill={isToday ? C.orange : barColor} fontSize={10} fontWeight="bold">{count}</text>
+            )}
+            {showLabel && (
+              <text x={x + BAR_W / 2} y={H + 18} textAnchor="middle"
+                fill={isToday ? C.orange : labelColor} fontSize={9}
+                fontWeight={isToday ? 'bold' : 'normal'}>{label}</text>
+            )}
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
 /* ══════════════════════════════════════════════════
    ANALYTICS TAB
 ══════════════════════════════════════════════════ */
@@ -676,6 +753,7 @@ function AnalyticsTab() {
   const [days,    setDays]    = useState(30);
 
   useEffect(() => {
+    setLoading(true);
     api.get('/admin/analytics', { params:{ days } })
       .then(r => setData(r.data))
       .finally(() => setLoading(false));
@@ -697,6 +775,17 @@ function AnalyticsTab() {
 
       {loading ? <div style={{textAlign:'center',padding:60,fontSize:40}}>⏳</div> : (
         <>
+          {/* Daily completions chart */}
+          <div style={{ background:'linear-gradient(135deg,#E8FFFE,#fff)', border:`4px solid ${C.cyan}`, borderRadius:24, padding:24, marginBottom:20,
+            boxShadow:`0 8px 0 ${C.cyan}44` }}>
+            <div style={{ fontFamily:FONT_HEAD, fontSize:20, color:C.cyan, marginBottom:4 }}>📅 Daily Completions</div>
+            <div style={{ color:C.muted, fontSize:12, marginBottom:16 }}>Sessions completed per day (last {days} days)</div>
+            <MiniBarChart completions={data?.completions} barColor={C.cyan} days={Math.min(days, 30)} />
+            <div style={{ textAlign:'center', color:C.muted, fontSize:11, marginTop:8 }}>
+              Total: {(data?.completions || []).reduce((s, c) => s + (c._count || 0), 0)} completions
+            </div>
+          </div>
+
           {/* Revenue by plan */}
           <div style={{ background:'linear-gradient(135deg,#FFF8E1,#fff)', border:`4px solid ${C.orange}`, borderRadius:24, padding:24, marginBottom:20,
             boxShadow:`0 8px 0 ${C.orange}44` }}>

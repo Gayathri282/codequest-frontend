@@ -1,17 +1,19 @@
 // frontend/src/pages/LessonPage.jsx
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useSession }       from '../hooks/useSession';
 import { useProgress }      from '../hooks/useProgress';
 import { useCourseContext } from '../context/CourseContext';
 import { useAuth }          from '../context/AuthContext';
 import { setLastLesson }    from '../utils/storage';
+import api                  from '../utils/api';
 import Hud                  from '../components/shared/Hud';
 import Btn                  from '../components/shared/Btn';
 import LoadingScreen        from '../components/shared/LoadingScreen';
 import VideoPlayer          from '../components/lesson/VideoPlayer';
 import CodeEditor           from '../components/lesson/CodeEditor';
 import DocumentViewer       from '../components/lesson/DocumentViewer';
+import PlatformIntro        from '../components/lesson/PlatformIntro';
 
 const C = { orange:'#FF6B35', cyan:'#00C8E8', lime:'#7ED957', yellow:'#FFD700', red:'#FF4757', teal:'#00C8A0' };
 
@@ -30,7 +32,27 @@ export default function LessonPage() {
   const [nextSession,  setNextSession]  = useState(null);
   const [canComplete,  setCanComplete]  = useState(true);   // false until 75% watched/read
   const [earlyMsg,     setEarlyMsg]     = useState('');
+  const [earlyConfirm, setEarlyConfirm] = useState(false);  // true = show "Complete Anyway?" banner
   const earlyMsgTimer = useRef(null);
+
+  // ── Platform intro (shown once before session 1) ─────────────────────
+  const [showIntro,   setShowIntro]   = useState(false);
+  const [missionOpen, setMissionOpen] = useState(false);
+
+  // ── Split preview (right-column full-height when video + IDE) ────────
+  const [splitPreview, setSplitPreview] = useState('');
+
+  useEffect(() => {
+    if (!session) return;
+    if (session.order === 1 && !localStorage.getItem('cq_platform_intro_done')) {
+      setShowIntro(true);
+    }
+  }, [session?.id]); // eslint-disable-line
+
+  function handleIntroDone() {
+    localStorage.setItem('cq_platform_intro_done', '1');
+    setShowIntro(false);
+  }
 
   // Remember last visited lesson (in effect, not render body)
   useEffect(() => { if (id) setLastLesson(id); }, [id]);
@@ -42,6 +64,7 @@ export default function LessonPage() {
       session.type === 'VIDEO' || session.type === 'BOSS' || session.type === 'DOCUMENT';
     setCanComplete(!needsGate);
     setEarlyMsg('');
+    setEarlyConfirm(false);
   }, [session?.id]);
 
   // Redirect quiz sessions to the dedicated quiz page
@@ -55,7 +78,7 @@ export default function LessonPage() {
       const result = await completeSession(id, 3);
       markSessionDone(id);
 
-      // Find next session and navigate directly
+      // Find next session — used by the reward popup buttons
       const course = courses.find(c => c.sessions?.some(s => s.id === id));
       let next = null;
       if (course) {
@@ -63,10 +86,18 @@ export default function LessonPage() {
         const idx = sorted.findIndex(s => s.id === id);
         next = sorted[idx + 1] ?? null;
       }
+      setNextSession(next);
 
-      if (!next) { nav('/dashboard'); return; }
-      if (!isPremium && next.order > freeLimit) { nav('/pricing'); return; }
-      nav(next.type === 'QUIZ' ? `/quiz/${next.id}` : `/lesson/${next.id}`);
+      // If already done before — no popup, just move on
+      if (result.alreadyDone) {
+        const courseId = course?.id;
+        if (next && (isPremium || next.order <= freeLimit)) {
+          nav(next.type === 'QUIZ' ? `/quiz/${next.id}` : `/lesson/${next.id}`);
+        } else {
+          nav(courseId ? `/course/${courseId}` : '/courses');
+        }
+      }
+      // Otherwise the reward popup (reward && !reward.alreadyDone) takes over
     } catch (err) {
       const msg = err.code === 'ECONNABORTED' || err.message?.includes('timeout')
         ? '⏱ Server took too long — is the backend running?'
@@ -78,22 +109,44 @@ export default function LessonPage() {
   function handleMarkDoneGuarded() {
     if (!canComplete) {
       const isDoc = session?.type === 'DOCUMENT';
-      setEarlyMsg(isDoc
-        ? '📖 Tip: scroll through the content for the full lesson — but you can still mark done!'
-        : '🎬 Tip: finish watching the video for the full lesson — but you can still mark done!');
-      clearTimeout(earlyMsgTimer.current);
-      earlyMsgTimer.current = setTimeout(() => setEarlyMsg(''), 4000);
+      if (isDoc) {
+        // For documents: show tip and proceed immediately (light gate)
+        setEarlyMsg('📖 Tip: scroll through the content for the full lesson!');
+        clearTimeout(earlyMsgTimer.current);
+        earlyMsgTimer.current = setTimeout(() => setEarlyMsg(''), 4000);
+        handleMarkDone();
+      } else {
+        // For video: require explicit confirmation before marking done
+        setEarlyConfirm(true);
+      }
+      return;
     }
-    // Always proceed regardless
     handleMarkDone();
   }
 
+  // Called by VideoPlayer whenever student pauses or leaves
+  const handleVideoProgress = useCallback((exitSeconds, duration, maxSeconds) => {
+    if (!session?.id || !currentCourse?.id) return;
+    api.patch('/progress/video-watch', {
+      sessionId:    session.id,
+      courseId:     currentCourse.id,
+      exitSeconds,
+      maxSeconds,
+      duration,
+    }).catch(() => {}); // silent — analytics only
+  }, [session?.id, currentCourse?.id]); // eslint-disable-line
+
   function goNext() {
     clearReward();
+    const ns = nextSession;
     setNextSession(null);
-    if (!nextSession) { nav('/dashboard'); return; }
-    if (!isPremium && nextSession.order > freeLimit) { nav('/pricing'); return; }
-    nav(nextSession.type === 'QUIZ' ? `/quiz/${nextSession.id}` : `/lesson/${nextSession.id}`);
+    if (!ns) {
+      // Last session — go back to the course roadmap
+      nav(currentCourse?.id ? `/course/${currentCourse.id}` : '/courses');
+      return;
+    }
+    if (!isPremium && ns.order > freeLimit) { nav('/pricing'); return; }
+    nav(ns.type === 'QUIZ' ? `/quiz/${ns.id}` : `/lesson/${ns.id}`);
   }
 
   function handleUpgrade() {
@@ -154,8 +207,11 @@ export default function LessonPage() {
   const hasIDE   = Boolean(session?.hasIde)   || session?.type === 'CODE'  || session?.type === 'BOSS';
 
   return (
-    <div style={{ height:'100vh', display:'flex', flexDirection:'column',
-      background:'#F0FFF8', fontFamily:"'Quicksand',sans-serif", overflow:'hidden' }}>
+    <div
+      onContextMenu={e => e.preventDefault()}
+      style={{ height:'100vh', display:'flex', flexDirection:'column',
+        background:'#F0FFF8', fontFamily:"'Quicksand',sans-serif", overflow:'hidden' }}
+    >
 
       {/* ── Completion celebration overlay ── */}
       {reward && !reward.alreadyDone && (
@@ -241,7 +297,7 @@ export default function LessonPage() {
             ))}
 
             <div style={{ marginTop:22, display:'flex', gap:12, justifyContent:'center', flexWrap:'wrap' }}>
-              <button onClick={() => { clearReward(); setNextSession(null); nav('/dashboard'); }}
+              <button onClick={() => { clearReward(); setNextSession(null); nav(currentCourse?.id ? `/course/${currentCourse.id}` : '/courses'); }}
                 style={{ background:'rgba(255,255,255,.08)', border:'2px solid rgba(255,255,255,.2)',
                   borderRadius:14, color:'rgba(232,255,245,.8)',
                   fontFamily:"'Fredoka One',cursive", fontSize:15, padding:'10px 20px', cursor:'pointer' }}>
@@ -263,7 +319,7 @@ export default function LessonPage() {
                   }}>
                     {needsUpgrade ? '👑 Upgrade to Continue'
                       : nextSession ? `▶ Next: ${nextSession.title}`
-                      : '🏁 Finish Course!'}
+                      : '🗺️ Back to Map'}
                   </button>
                 );
               })()}
@@ -322,6 +378,31 @@ export default function LessonPage() {
             {earlyMsg}
           </div>
         )}
+        {earlyConfirm && (
+          <div style={{ width:'100%', background:'rgba(255,107,53,.1)', border:'2px solid rgba(255,107,53,.5)',
+            borderRadius:10, padding:'10px 14px', marginTop:6, flexShrink:0,
+            display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
+            <span style={{ flex:1, color:'#C84A1A', fontSize:12, fontWeight:700 }}>
+              🎬 You haven't finished the video yet. You can still complete it — but your progress won't be fully counted.
+            </span>
+            <button
+              onClick={() => { setEarlyConfirm(false); handleMarkDone(); }}
+              style={{ background:'linear-gradient(180deg,#FF6B35,#E8501A)', border:'none',
+                borderRadius:10, padding:'7px 18px', cursor:'pointer',
+                fontFamily:"'Fredoka One',cursive", fontSize:13, color:'#fff',
+                boxShadow:'0 3px 0 #C04A1A', flexShrink:0 }}>
+              Complete Anyway ✓
+            </button>
+            <button
+              onClick={() => setEarlyConfirm(false)}
+              style={{ background:'rgba(255,255,255,.1)', border:'1.5px solid rgba(255,255,255,.2)',
+                borderRadius:10, padding:'7px 14px', cursor:'pointer',
+                fontFamily:"'Fredoka One',cursive", fontSize:13, color:'rgba(232,255,245,.6)',
+                flexShrink:0 }}>
+              Keep Watching
+            </button>
+          </div>
+        )}
         {doneError && (
           <div style={{ width:'100%', background:`${C.red}18`, border:`2px solid ${C.red}55`,
             borderRadius:10, padding:'6px 14px', color:C.red, fontSize:12, fontWeight:700,
@@ -332,44 +413,87 @@ export default function LessonPage() {
       </div>
 
       {/* ── Main content ── */}
-      <div style={{ flex:1, display:'flex', overflow:'hidden', minHeight:0 }}>
+      <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden', minHeight:0 }}>
 
         {/* DOCUMENT */}
         {session?.type === 'DOCUMENT' && (
-          <DocumentViewer title={session.title} content={session.docContent} onCanComplete={() => setCanComplete(true)} />
+          <div style={{ flex:1, display:'flex', overflow:'hidden', minHeight:0 }}>
+            <DocumentViewer title={session.title} content={session.docContent} onCanComplete={() => setCanComplete(true)} />
+          </div>
         )}
 
-        {/* VIDEO or BOSS — left side video, optional right side IDE */}
-        {hasVideo && (
-          <>
-            <div style={{
-              flex: hasIDE ? '0 0 45%' : '1',
-              display:'flex', flexDirection:'column',
-              overflow:'hidden', minHeight:0,
-              borderRight: hasIDE ? `3px solid #C8EEFF` : 'none',
-            }}>
-              <VideoPlayer
-                videoUrl={session?.videoUrl}
-                missionText={session?.missionText}
-                docContent={session?.docContent}
-                fullView={!hasIDE}
-                onCanComplete={() => setCanComplete(true)}
-              />
-            </div>
-            {hasIDE && (
-              <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden', minHeight:0 }}>
+        {/* VIDEO + IDE — left col (video top + editor bottom) · right col (preview full height) */}
+        {hasVideo && hasIDE && (
+          <div style={{ flex:1, display:'flex', overflow:'hidden', minHeight:0 }}>
+
+            {/* LEFT column: video on top, editor on bottom */}
+            <div style={{ flex:'0 0 50%', display:'flex', flexDirection:'column',
+              overflow:'hidden', borderRight:`3px solid #C8EEFF` }}>
+
+              {/* Video — top ~42% — only mount after intro is dismissed */}
+              <div style={{ flex:'0 0 42%', overflow:'hidden', minHeight:0,
+                borderBottom:`3px solid #C8EEFF` }}>
+                {!showIntro && (
+                  <VideoPlayer
+                    videoUrl={session?.videoUrl}
+                    docContent={session?.docContent}
+                    fullView={false}
+                    onCanComplete={() => setCanComplete(true)}
+                    onProgress={handleVideoProgress}
+                  />
+                )}
+              </div>
+
+              {/* Editor — bottom 58% (no inline preview) */}
+              <div style={{ flex:1, overflow:'hidden', minHeight:0, display:'flex', flexDirection:'column' }}>
                 <CodeEditor
                   starterCode={session?.starterCode || defaultStarterCode}
                   sessionId={id}
+                  hidePreview
+                  onRun={setSplitPreview}
                 />
               </div>
+            </div>
+
+            {/* RIGHT column: live preview full height */}
+            <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
+              <div style={{ background:`linear-gradient(90deg,${C.cyan}20,#EBF8FF)`,
+                padding:'5px 14px', fontSize:11, color:C.cyan,
+                fontFamily:"'Quicksand',sans-serif", fontWeight:700, letterSpacing:.6,
+                flexShrink:0, borderBottom:`1px solid ${C.cyan}33`,
+                display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                <span>👁 LIVE PREVIEW</span>
+                <span style={{ color:'#B0C8E0', fontSize:10, fontWeight:600 }}>▶ Run to update</span>
+              </div>
+              <iframe
+                srcDoc={splitPreview}
+                style={{ flex:1, border:'none', width:'100%' }}
+                sandbox="allow-scripts"
+                title="Preview"
+                onContextMenu={e => e.preventDefault()}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* VIDEO only (no IDE) — only mount after intro is dismissed */}
+        {hasVideo && !hasIDE && (
+          <div style={{ flex:1, display:'flex', overflow:'hidden', minHeight:0 }}>
+            {!showIntro && (
+              <VideoPlayer
+                videoUrl={session?.videoUrl}
+                docContent={session?.docContent}
+                fullView
+                onCanComplete={() => setCanComplete(true)}
+                onProgress={handleVideoProgress}
+              />
             )}
-          </>
+          </div>
         )}
 
         {/* CODE only (no video) */}
         {session?.type === 'CODE' && !hasVideo && (
-          <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden', minHeight:0 }}>
+          <div style={{ flex:1, display:'flex', overflow:'hidden', minHeight:0 }}>
             <CodeEditor
               starterCode={session?.starterCode || defaultStarterCode}
               sessionId={id}
@@ -386,6 +510,90 @@ export default function LessonPage() {
           </div>
         )}
       </div>
+
+      {/* ── Floating Missions button ── */}
+      {session?.missionText && (
+        <button
+          onClick={() => setMissionOpen(true)}
+          style={{
+            position:'fixed', bottom:24, right:24, zIndex:80,
+            background:`linear-gradient(135deg,${C.lime},#5BB832)`,
+            border:'none', borderRadius:50,
+            padding:'11px 20px', cursor:'pointer',
+            fontFamily:"'Fredoka One',cursive", fontSize:15,
+            color:'#1A3020', boxShadow:`0 4px 0 #3A8A1A, 0 0 20px ${C.lime}55`,
+            display:'flex', alignItems:'center', gap:8,
+            transition:'transform .12s',
+          }}
+          onMouseEnter={e => e.currentTarget.style.transform='translateY(-2px)'}
+          onMouseLeave={e => e.currentTarget.style.transform='translateY(0)'}
+        >
+          📋 Missions
+        </button>
+      )}
+
+      {/* ── Missions popup ── */}
+      {missionOpen && (
+        <div
+          onClick={() => setMissionOpen(false)}
+          style={{ position:'fixed', inset:0, background:'rgba(4,26,14,.75)',
+            backdropFilter:'blur(6px)', zIndex:150,
+            display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              background:'#0D2B1A', border:`3px solid ${C.lime}`,
+              borderRadius:24, padding:'28px 28px 24px',
+              maxWidth:460, width:'100%',
+              boxShadow:`0 0 60px ${C.lime}33`,
+              fontFamily:"'Quicksand',sans-serif",
+            }}
+          >
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:16 }}>
+              <div style={{ fontFamily:"'Fredoka One',cursive", fontSize:22, color:C.lime }}>
+                📋 Your Mission
+              </div>
+              <button onClick={() => setMissionOpen(false)}
+                style={{ background:'rgba(255,255,255,.1)', border:'none', borderRadius:8,
+                  color:'rgba(232,255,245,.7)', fontSize:18, cursor:'pointer',
+                  width:32, height:32, display:'flex', alignItems:'center', justifyContent:'center' }}>
+                ✕
+              </button>
+            </div>
+            <div style={{
+              background:'linear-gradient(135deg,#0A3D1F,#0D2B1A)',
+              border:`2px solid ${C.lime}44`, borderRadius:16,
+              padding:18, fontSize:14, color:'#E8FFF5',
+              lineHeight:1.8, whiteSpace:'pre-line', fontWeight:600,
+            }}>
+              {session.missionText}
+            </div>
+            {session.docContent && (
+              <div style={{ marginTop:14, fontSize:13, color:'rgba(232,255,245,.75)',
+                lineHeight:1.8, background:'rgba(0,0,0,.25)', borderRadius:12,
+                padding:14, border:`1px solid rgba(126,217,87,.2)`, whiteSpace:'pre-line' }}>
+                {session.docContent}
+              </div>
+            )}
+            <button onClick={() => setMissionOpen(false)}
+              style={{
+                marginTop:18, width:'100%', padding:'12px',
+                background:`linear-gradient(180deg,${C.lime},#5BB832)`,
+                border:'none', borderRadius:14,
+                fontFamily:"'Fredoka One',cursive", fontSize:16,
+                color:'#1A3020', cursor:'pointer', boxShadow:`0 4px 0 #3A8A1A`,
+              }}>
+              Got it! Let's code 💻
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Platform intro overlay (session 1, first visit) ── */}
+      {showIntro && (
+        <PlatformIntro avatar={user?.avatarEmoji} onDone={handleIntroDone} />
+      )}
     </div>
   );
 }

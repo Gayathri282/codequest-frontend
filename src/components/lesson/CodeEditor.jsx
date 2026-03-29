@@ -87,7 +87,7 @@ function loadSaved(sessionId, starterCode) {
   return [{ name:'index.html', content: starterCode || '' }];
 }
 
-export default function CodeEditor({ starterCode = '', sessionId }) {
+export default function CodeEditor({ starterCode = '', sessionId, hidePreview = false, onRun = null }) {
   const initial = () => loadSaved(sessionId, starterCode);
 
   const [files,     setFiles]     = useState(initial);
@@ -122,7 +122,14 @@ export default function CodeEditor({ starterCode = '', sessionId }) {
   /* focus new-file input */
   useEffect(() => { if (adding) newNameRef.current?.focus(); }, [adding]);
 
-  function run() { setPreview(buildDoc(files, activeIdx)); }
+  /* fire initial preview to parent on mount */
+  useEffect(() => { if (onRun) onRun(buildDoc(initial(), 0)); }, []); // eslint-disable-line
+
+  function run() {
+    const doc = buildDoc(files, activeIdx);
+    setPreview(doc);
+    if (onRun) onRun(doc);
+  }
 
   function reset() {
     const next = [{ name:'index.html', content: starterCode }];
@@ -286,32 +293,34 @@ export default function CodeEditor({ starterCode = '', sessionId }) {
             fontSize:13, lineHeight:1.8, outline:'none', resize:'none', minHeight:0 }} />
       </div>
 
-      {/* ── Preview ── */}
-      <div ref={previewWrap}
-        style={{ height:'36%', minHeight:160, display:'flex', flexDirection:'column',
-          borderTop:`3px solid ${C.cyan}`, flexShrink:0, background:'#fff',
-          ...(previewFs ? { position:'fixed', inset:0, zIndex:9999, height:'100vh' } : {}) }}>
-        <div style={{ background:`linear-gradient(90deg,${C.cyan}20,#EBF8FF)`,
-          padding:'5px 12px', fontSize:11, color:C.cyan, fontFamily:F.body,
-          fontWeight:700, letterSpacing:.6, flexShrink:0,
-          borderBottom:`1px solid ${C.cyan}33`,
-          display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-          <span>👁 LIVE PREVIEW</span>
-          <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-            <span style={{ color:'#B0C8E0', fontSize:10, fontWeight:600 }}>▶ Run to update</span>
-            <button onClick={togglePreviewFs}
-              style={{ background: previewFs ? `${C.orange}22` : 'transparent',
-                border:`1.5px solid ${previewFs ? C.orange : C.cyan}`,
-                borderRadius:6, padding:'2px 8px', cursor:'pointer',
-                fontSize:11, color: previewFs ? C.orange : C.cyan,
-                fontFamily:F.body, fontWeight:700 }}>
-              {previewFs ? '✕ Exit' : '⛶ Fullscreen'}
-            </button>
+      {/* ── Preview (inline — hidden when parent controls it) ── */}
+      {!hidePreview && (
+        <div ref={previewWrap}
+          style={{ height:'36%', minHeight:160, display:'flex', flexDirection:'column',
+            borderTop:`3px solid ${C.cyan}`, flexShrink:0, background:'#fff',
+            ...(previewFs ? { position:'fixed', inset:0, zIndex:9999, height:'100vh' } : {}) }}>
+          <div style={{ background:`linear-gradient(90deg,${C.cyan}20,#EBF8FF)`,
+            padding:'5px 12px', fontSize:11, color:C.cyan, fontFamily:F.body,
+            fontWeight:700, letterSpacing:.6, flexShrink:0,
+            borderBottom:`1px solid ${C.cyan}33`,
+            display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+            <span>👁 LIVE PREVIEW</span>
+            <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+              <span style={{ color:'#B0C8E0', fontSize:10, fontWeight:600 }}>▶ Run to update</span>
+              <button onClick={togglePreviewFs}
+                style={{ background: previewFs ? `${C.orange}22` : 'transparent',
+                  border:`1.5px solid ${previewFs ? C.orange : C.cyan}`,
+                  borderRadius:6, padding:'2px 8px', cursor:'pointer',
+                  fontSize:11, color: previewFs ? C.orange : C.cyan,
+                  fontFamily:F.body, fontWeight:700 }}>
+                {previewFs ? '✕ Exit' : '⛶ Fullscreen'}
+              </button>
+            </div>
           </div>
+          <iframe srcDoc={preview} style={{ flex:1, border:'none' }}
+            sandbox="allow-scripts" title="Preview" />
         </div>
-        <iframe srcDoc={preview} style={{ flex:1, border:'none' }}
-          sandbox="allow-scripts" title="Preview" />
-      </div>
+      )}
     </div>
   );
 }

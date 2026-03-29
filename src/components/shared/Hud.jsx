@@ -28,13 +28,13 @@ export default function Hud() {
           fontSize:17, letterSpacing:.5 }}>CodeQuest</span>
       </div>
 
-      {/* Avatar */}
-      <div style={{
+      {/* Avatar — click to go to settings */}
+      <div onClick={() => nav('/settings')} style={{
         width:40, height:40, borderRadius:'50%',
         background:'linear-gradient(135deg,#FF6B35,#FF8C42)',
         border:'2.5px solid rgba(255,107,53,.6)',
         display:'flex', alignItems:'center', justifyContent:'center',
-        fontSize:20, flexShrink:0,
+        fontSize:20, flexShrink:0, cursor:'pointer',
       }}>{user.avatarEmoji || '🐸'}</div>
 
       {/* Name + level + bar */}
@@ -63,8 +63,11 @@ export default function Hud() {
       <button onClick={() => nav('/progress')} style={navBtn('#00C8A0','rgba(0,200,160,.15)','rgba(0,200,160,.4)')}>
         📊 Progress
       </button>
+      <button onClick={() => nav('/settings')} style={navBtn('#FFD700','rgba(255,215,0,.12)','rgba(255,215,0,.35)')}>
+        ⚙️ Settings
+      </button>
       <button onClick={() => { logout(); nav('/'); }} style={navBtn('#FF9999','rgba(255,71,87,.12)','rgba(255,71,87,.35)')}>
-        Exit
+        🚪 Exit
       </button>
     </div>
   );

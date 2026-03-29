@@ -18,6 +18,57 @@ const AVATARS = [
   '🐙','🦄','🐧','🦋','🦔','🐺','🦝','🐵','🦉','🐊',
 ];
 
+function ActivityChart({ courses }) {
+  const allSessions = courses?.flatMap(c => c.sessions) || [];
+  const today = new Date();
+  const days = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(today);
+    d.setDate(d.getDate() - (6 - i));
+    return d;
+  });
+  const counts = days.map(d =>
+    allSessions.filter(s => s.completedAt && new Date(s.completedAt).toDateString() === d.toDateString()).length
+  );
+  const maxCount = Math.max(...counts, 1);
+  const W = 320, H = 90, BAR_W = 30, GAP = (W - BAR_W * 7) / 8;
+
+  return (
+    <div style={{ background:'rgba(13,59,34,.92)', border:`3px solid ${T.teal}`,
+      borderRadius:24, padding:'20px 24px', marginBottom:20,
+      boxShadow:`0 8px 0 rgba(0,140,110,.5)`, animation:'rise .4s .05s ease both' }}>
+      <div style={{ fontFamily:"'Fredoka One',cursive", fontSize:20, color:T.teal, marginBottom:16 }}>
+        📅 Activity — Last 7 Days
+      </div>
+      <svg width={W} height={H + 24} style={{ display:'block', margin:'0 auto', overflow:'visible' }}>
+        {counts.map((count, i) => {
+          const barH = Math.max((count / maxCount) * H, count > 0 ? 6 : 3);
+          const x = GAP + i * (BAR_W + GAP);
+          const y = H - (count > 0 ? barH : 3);
+          const label = days[i].toLocaleDateString('en-US', { weekday: 'short' });
+          const isToday = i === 6;
+          return (
+            <g key={i}>
+              <rect x={x} y={y} width={BAR_W} height={barH}
+                fill={count > 0 ? (isToday ? T.orange : T.teal) : 'rgba(255,255,255,.1)'}
+                rx={6} />
+              {count > 0 && (
+                <text x={x + BAR_W / 2} y={y - 5} textAnchor="middle"
+                  fill={isToday ? T.orange : T.teal} fontSize={11} fontWeight="bold">{count}</text>
+              )}
+              <text x={x + BAR_W / 2} y={H + 18} textAnchor="middle"
+                fill={isToday ? T.orange : 'rgba(232,255,245,.5)'} fontSize={11}
+                fontWeight={isToday ? 'bold' : 'normal'}>{label}</text>
+            </g>
+          );
+        })}
+      </svg>
+      <div style={{ textAlign:'center', color:'rgba(232,255,245,.4)', fontSize:11, marginTop:4, fontWeight:600 }}>
+        {allSessions.length} total sessions completed
+      </div>
+    </div>
+  );
+}
+
 function StatBox({ icon, value, label, color, bg }) {
   return (
     <div style={{ background: bg || 'rgba(255,255,255,.08)',
@@ -161,6 +212,9 @@ export default function ProgressPage() {
                 </div>
               </div>
 
+              {/* 7-day activity chart */}
+              {courses && <ActivityChart courses={courses} />}
+
               {/* Character picker modal */}
               {showPicker && (
                 <div style={{ position:'fixed', inset:0,
@@ -265,7 +319,9 @@ export default function ProgressPage() {
                           ))}
                         </div>
                         <span style={{ color:T.orange, fontSize:12, fontWeight:700 }}>+{p.xpEarned} XP</span>
-                        <span style={{ color:T.muted, fontSize:11 }}>{timeAgo(p.completedAt)}</span>
+                        <span style={{ color:T.muted, fontSize:11 }} title={p.completedAt ? new Date(p.completedAt).toLocaleString() : ''}>
+                          {timeAgo(p.completedAt)}
+                        </span>
                       </div>
                     </div>
                   ))}

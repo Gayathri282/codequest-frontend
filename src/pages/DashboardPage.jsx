@@ -1,67 +1,35 @@
 // frontend/src/pages/DashboardPage.jsx
-import { useNavigate }      from 'react-router-dom';
-import { useAuth }          from '../context/AuthContext';
+import { useNavigate } from 'react-router-dom';
+import { useAuth }     from '../context/AuthContext';
 import { useCourseContext } from '../context/CourseContext';
-import { formatXpProgress } from '../utils/formatters';
-import LoadingScreen        from '../components/shared/LoadingScreen';
-import OnboardingFlow       from '../components/student/OnboardingFlow';
+import LoadingScreen   from '../components/shared/LoadingScreen';
 
 const T = {
-  deep:   '#041A0E', dark:  '#062213', mid:  '#0D3B22',
-  lime:   '#7ED957', teal:  '#00C8A0', cyan: '#00C8E8',
-  orange: '#FF6B35', gold:  '#FFD700', white:'#E8FFF5',
+  deep:'#041A0E', dark:'#062213', mid:'#0D3B22',
+  lime:'#7ED957', teal:'#00C8A0', cyan:'#00C8E8',
+  orange:'#FF6B35', gold:'#FFD700', white:'#E8FFF5',
 };
 
 export default function DashboardPage() {
   const { user, logout }     = useAuth();
   const { courses, loading } = useCourseContext();
   const nav                  = useNavigate();
-  const { level, xpInLevel, xpNeeded, pct } = formatXpProgress(user?.xp || 0);
 
   if (loading) return <LoadingScreen />;
 
-  const isNew = (user?.xp === 0) && !localStorage.getItem('codequest_onboarded');
-  if (isNew) {
-    return (
-      <OnboardingFlow user={user} courses={courses}
-        onDone={sessionId => {
-          localStorage.setItem('codequest_onboarded', '1');
-          if (sessionId) nav(`/lesson/${sessionId}`);
-        }}
-      />
-    );
-  }
-
-  const nextSession = courses
-    .filter(c => !c.isLocked)
-    .flatMap(c => (c.sessions || []).map(s => ({ ...s, courseId: c.id })))
-    .find(s => !s.completed);
-  const firstCourse = courses.find(c => !c.isLocked);
-
-  const isPremium = user?.plan === 'PREMIUM' || user?.plan === 'BASIC' || user?.role === 'ADMIN';
-
   function handlePlay() {
-    if (nextSession) {
-      if (!isPremium && nextSession.order > 4) { nav('/pricing'); return; }
-      nav(nextSession.type === 'QUIZ' ? `/quiz/${nextSession.id}` : `/lesson/${nextSession.id}`);
-    } else if (firstCourse) {
-      nav(`/course/${firstCourse.id}`);
-    }
+    nav('/courses');
   }
-
-  const totalSessions = courses.flatMap(c => c.sessions || []).length;
-  const doneSessions  = courses.flatMap(c => c.sessions || []).filter(s => s.completed).length;
-  const overallPct    = totalSessions ? Math.round((doneSessions / totalSessions) * 100) : 0;
 
   return (
     <>
       <style>{`
-        @keyframes bob     { 0%,100%{transform:translateY(0)}  50%{transform:translateY(-14px)} }
+        @keyframes bob     { 0%,100%{transform:translateY(0)}  50%{transform:translateY(-18px)} }
         @keyframes sway    { 0%,100%{transform:rotate(-6deg)} 50%{transform:rotate(6deg)} }
-        @keyframes pulse   { 0%,100%{transform:scale(1);box-shadow:0 10px 0 #C04A1A,0 0 0 0 ${T.orange}88} 50%{transform:scale(1.04);box-shadow:0 10px 0 #C04A1A,0 0 0 18px ${T.orange}00} }
+        @keyframes pulse   { 0%,100%{transform:scale(1);box-shadow:0 10px 0 #C04A1A,0 0 0 0 ${T.orange}88} 50%{transform:scale(1.04);box-shadow:0 10px 0 #C04A1A,0 0 0 22px ${T.orange}00} }
         @keyframes shimmer { 0%,100%{opacity:.5} 50%{opacity:1} }
-        @keyframes fall    { from{opacity:0;transform:translateY(-16px)} to{opacity:1;transform:none} }
         @keyframes rain    { 0%{transform:translateY(-100vh)} 100%{transform:translateY(110vh)} }
+        @keyframes glow    { 0%,100%{opacity:.6} 50%{opacity:1} }
       `}</style>
 
       <div style={{
@@ -97,172 +65,72 @@ export default function DashboardPage() {
         ].map((f, i) => (
           <div key={i} style={{
             position: 'absolute', left: f.left, top: f.top,
-            width: 6, height: 6, borderRadius: '50%',
-            background: f.c, boxShadow: `0 0 10px ${f.c}`,
+            width: 7, height: 7, borderRadius: '50%',
+            background: f.c, boxShadow: `0 0 14px ${f.c}`,
             animation: `shimmer ${1.4 + i * 0.3}s ease-in-out infinite`,
             animationDelay: f.d, pointerEvents: 'none',
           }} />
         ))}
 
-        {/* ── Top bar ── */}
+        {/* Top bar — minimal */}
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '12px 24px', flexWrap: 'wrap', gap: 10,
+          padding: '12px 24px',
           position: 'relative', zIndex: 10,
-          background: 'rgba(4,26,14,.9)', borderBottom: `2px solid rgba(126,217,87,.25)`,
+          background: 'rgba(4,26,14,.7)',
         }}>
           <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-            <span style={{ fontSize:22, animation:'sway 3s ease-in-out infinite' }}>🐸</span>
+            <span style={{ fontSize:22, animation:'sway 3s ease-in-out infinite', display:'inline-block' }}>🐸</span>
             <span style={{ fontFamily:"'Fredoka One',cursive", color:T.lime, fontSize:20, letterSpacing:.5 }}>
               CodeQuest
             </span>
           </div>
-
-          <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
-            {[
-              { icon:'⚡', val:`Lv ${level}`,              color:T.lime,   bg:'rgba(126,217,87,.15)',  border:'rgba(126,217,87,.4)'  },
-              { icon:'🪙', val:user?.coins ?? 0,            color:T.gold,   bg:'rgba(255,215,0,.1)',    border:'rgba(255,215,0,.4)'   },
-              { icon:'🔥', val:`${user?.streakDays ?? 0}d`, color:'#FF8C42',bg:'rgba(255,140,66,.12)',  border:'rgba(255,140,66,.4)'  },
-            ].map(s => (
-              <div key={s.icon} style={{
-                background: s.bg, border: `1.5px solid ${s.border}`,
-                borderRadius: 12, padding: '5px 12px',
-                display: 'flex', alignItems: 'center', gap: 5,
-              }}>
-                <span style={{ fontSize:14 }}>{s.icon}</span>
-                <span style={{ fontFamily:"'Fredoka One',cursive", color:s.color, fontSize:14 }}>{s.val}</span>
-              </div>
-            ))}
-            <button onClick={() => nav('/progress')} style={navBtn(T.teal)}>📊 Progress</button>
-            <button onClick={() => nav('/settings')} style={navBtn(T.white)}>⚙️ Settings</button>
-            <button onClick={() => { logout(); nav('/'); }} style={navBtn('#FF8888')}>Exit</button>
-          </div>
+          <button onClick={() => { logout(); nav('/'); }} style={{
+            background:'rgba(255,255,255,.08)', border:'1.5px solid rgba(255,255,255,.2)',
+            borderRadius:12, padding:'6px 14px', cursor:'pointer',
+            fontFamily:"'Fredoka One',cursive", color:'rgba(232,255,245,.5)', fontSize:12,
+          }}>Exit</button>
         </div>
 
-        {/* ── Main ── */}
+        {/* Center content */}
         <div style={{
           flex: 1, display: 'flex', flexDirection: 'column',
           alignItems: 'center', justifyContent: 'center',
           padding: '0 24px 80px', position: 'relative', zIndex: 2,
+          gap: 0,
         }}>
 
-          {/* Player card */}
+          {/* Avatar */}
           <div style={{
-            background:'rgba(13,59,34,.9)', border:`2px solid rgba(126,217,87,.35)`,
-            borderRadius:20, padding:'12px 32px', textAlign:'center',
-            marginBottom:20, boxShadow:`0 4px 0 rgba(0,0,0,.4), inset 0 1px 0 rgba(126,217,87,.1)`,
-            animation:'fall .4s ease both',
-          }}>
-            <div style={{ fontFamily:"'Fredoka One',cursive", color:T.white, fontSize:18, marginBottom:6 }}>
-              {user?.displayName || user?.username}
-            </div>
-            <div style={{ width:220, height:10, background:'rgba(255,255,255,.15)',
-              borderRadius:10, overflow:'hidden', marginBottom:4 }}>
-              <div style={{ width:`${pct}%`, height:'100%',
-                background:`linear-gradient(90deg,${T.lime},${T.teal})`,
-                borderRadius:10, transition:'width .6s' }} />
-            </div>
-            <div style={{ color:'rgba(232,255,245,.7)', fontSize:11, fontWeight:700 }}>
-              {xpInLevel} / {xpNeeded} XP → Level {level + 1}
-            </div>
-          </div>
-
-          {/* Character */}
-          <div style={{
-            fontSize:120, lineHeight:1,
-            animation:'bob 2s ease-in-out infinite',
-            filter:`drop-shadow(0 0 40px ${T.lime}88)`,
-            marginBottom:12, userSelect:'none',
+            fontSize: 130, lineHeight: 1,
+            animation: 'bob 2.2s ease-in-out infinite',
+            filter: `drop-shadow(0 0 50px ${T.lime}99)`,
+            marginBottom: 32, userSelect: 'none',
           }}>
             {user?.avatarEmoji || '🐸'}
           </div>
 
-          {/* PLAY */}
-          <button onClick={handlePlay} style={{
-            fontFamily:"'Fredoka One',cursive",
-            fontSize:36, color:'#fff',
-            background:`linear-gradient(180deg,${T.orange},#E8501A)`,
-            border:`4px solid ${T.orange}`, borderRadius:28, padding:'22px 80px',
-            cursor:'pointer',
-            boxShadow:`0 10px 0 #C04A1A, 0 20px 60px ${T.orange}55`,
-            animation:'pulse 2s ease-in-out infinite',
-            letterSpacing:2, marginBottom:24,
-          }}
-            onMouseDown={e => e.currentTarget.style.transform='translateY(6px)'}
-            onMouseUp  ={e => e.currentTarget.style.transform=''}
-            onTouchStart={e => e.currentTarget.style.transform='translateY(6px)'}
-            onTouchEnd  ={e => e.currentTarget.style.transform=''}
+          {/* PLAY button */}
+          <button
+            onClick={handlePlay}
+            style={{
+              fontFamily: "'Fredoka One',cursive",
+              fontSize: 42, color: '#fff',
+              background: `linear-gradient(180deg,${T.orange},#E8501A)`,
+              border: `4px solid ${T.orange}`, borderRadius: 32, padding: '24px 100px',
+              cursor: 'pointer',
+              boxShadow: `0 12px 0 #C04A1A, 0 24px 70px ${T.orange}55`,
+              animation: 'pulse 2s ease-in-out infinite',
+              letterSpacing: 3,
+            }}
+            onMouseDown={e => { e.currentTarget.style.transform='translateY(8px)'; e.currentTarget.style.boxShadow=`0 4px 0 #C04A1A`; }}
+            onMouseUp={e   => { e.currentTarget.style.transform=''; e.currentTarget.style.boxShadow=`0 12px 0 #C04A1A, 0 24px 70px ${T.orange}55`; }}
+            onTouchStart={e => { e.currentTarget.style.transform='translateY(8px)'; }}
+            onTouchEnd={e   => { e.currentTarget.style.transform=''; }}
           >
             ▶ PLAY
           </button>
 
-          {/* Overall progress */}
-          {totalSessions > 0 && (
-            <div style={{
-              display:'flex', alignItems:'center', gap:12,
-              background:'rgba(13,59,34,.9)', border:`1.5px solid rgba(0,200,160,.35)`,
-              borderRadius:16, padding:'10px 22px', marginBottom:22,
-              animation:'fall .5s .1s ease both', opacity:0, animationFillMode:'forwards',
-            }}>
-              <span style={{ color:T.lime, fontSize:14, fontWeight:800 }}>{doneSessions}/{totalSessions}</span>
-              <div style={{ width:120, height:8, background:'rgba(255,255,255,.15)',
-                borderRadius:8, overflow:'hidden' }}>
-                <div style={{ width:`${overallPct}%`, height:'100%',
-                  background:`linear-gradient(90deg,${T.teal},${T.cyan})`, borderRadius:8 }} />
-              </div>
-              <span style={{ color:T.teal, fontSize:13, fontWeight:800 }}>{overallPct}%</span>
-            </div>
-          )}
-
-          {/* Course world mini-cards */}
-          <div style={{
-            display:'flex', gap:14, flexWrap:'wrap', justifyContent:'center',
-            maxWidth:600, animation:'fall .5s .15s ease both', opacity:0, animationFillMode:'forwards',
-          }}>
-            {courses.map((course, i) => {
-              const done = (course.sessions||[]).filter(s=>s.completed).length;
-              const tot  = (course.sessions||[]).length || 1;
-              const p    = Math.round((done/tot)*100);
-              return (
-                <div key={course.id} onClick={() => !course.isLocked && nav(`/course/${course.id}`)}
-                  style={{
-                    background: course.isLocked
-                      ? 'rgba(13,59,34,.6)'
-                      : `linear-gradient(160deg,${course.color||T.teal}33,rgba(13,59,34,.92))`,
-                    border:`2px solid ${course.isLocked ? 'rgba(255,255,255,.15)' : (course.color||T.teal)+'88'}`,
-                    borderRadius:18, padding:'14px 18px',
-                    cursor: course.isLocked ? 'default' : 'pointer',
-                    textAlign:'center', minWidth:110,
-                    opacity: course.isLocked ? 0.55 : 1,
-                    transition:'transform .15s', position:'relative',
-                  }}
-                  onMouseEnter={e => { if (!course.isLocked) e.currentTarget.style.transform='translateY(-4px)'; }}
-                  onMouseLeave={e => { e.currentTarget.style.transform=''; }}
-                >
-                  {course.isLocked && (
-                    <div style={{ position:'absolute', top:8, right:10, fontSize:14, opacity:.8 }}>🔒</div>
-                  )}
-                  <div style={{ fontSize:40, marginBottom:4,
-                    animation:`bob ${2+i*.2}s ease-in-out infinite`,
-                    animationDelay:`${i*.3}s` }}>
-                    {course.emoji || '🌿'}
-                  </div>
-                  <div style={{ fontFamily:"'Fredoka One',cursive", color:T.white,
-                    fontSize:13, marginBottom:6, lineHeight:1.2 }}>
-                    {course.title}
-                  </div>
-                  <div style={{ width:'100%', height:5, background:'rgba(255,255,255,.15)',
-                    borderRadius:5, overflow:'hidden' }}>
-                    <div style={{ width:`${p}%`, height:'100%',
-                      background:course.color||T.teal, borderRadius:5 }} />
-                  </div>
-                  <div style={{ color:'rgba(232,255,245,.65)', fontSize:10, marginTop:3, fontWeight:700 }}>
-                    {done}/{tot}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
         </div>
 
         {/* Bottom leaves */}
@@ -270,7 +138,7 @@ export default function DashboardPage() {
           display:'flex', alignItems:'flex-end', justifyContent:'space-around',
           padding:'0 8px', pointerEvents:'none', zIndex:1 }}>
           {['🌿','🍃','🌱','🌿','🍃','🌱','🌿','🍃','🌱','🌿','🍃','🌱'].map((e,i) => (
-            <span key={i} style={{ fontSize:20+(i*5)%16, opacity:.35,
+            <span key={i} style={{ fontSize:20+(i*5)%16, opacity:.4,
               animation:`sway ${3+i*.3}s ease-in-out infinite`,
               animationDelay:`${i*.2}s` }}>{e}</span>
           ))}
@@ -278,12 +146,4 @@ export default function DashboardPage() {
       </div>
     </>
   );
-}
-
-function navBtn(color) {
-  return {
-    background:'rgba(255,255,255,.1)', border:`1.5px solid rgba(255,255,255,.25)`,
-    borderRadius:12, padding:'6px 14px', cursor:'pointer',
-    fontFamily:"'Fredoka One',cursive", color, fontSize:13,
-  };
 }

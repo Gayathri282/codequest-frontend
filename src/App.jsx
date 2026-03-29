@@ -17,7 +17,8 @@ import StudentSettingsPage   from './pages/StudentSettingsPage';
 import AdminPage        from './pages/AdminPage';
 import PricingPage      from './pages/PricingPage';
 import ParentDashboard  from './pages/ParentDashboard';
-import OnboardingPage   from './pages/OnboardingPage';
+import OnboardingPage    from './pages/OnboardingPage';
+import CoursesListPage  from './pages/CoursesListPage';
 import NotFoundPage     from './pages/NotFoundPage';
 
 function LoadingSpinner() {
@@ -69,6 +70,7 @@ export default function App() {
         {/* Student */}
         <Route path="/onboarding"  element={<PrivateRoute><OnboardingPage /></PrivateRoute>} />
         <Route path="/dashboard"   element={<PrivateRoute><DashboardPage /></PrivateRoute>} />
+        <Route path="/courses"     element={<PrivateRoute><CoursesListPage /></PrivateRoute>} />
         <Route path="/course/:id"  element={<PrivateRoute><CoursePage /></PrivateRoute>} />
         <Route path="/lesson/:id"  element={<PrivateRoute><LessonPage /></PrivateRoute>} />
         <Route path="/quiz/:id"    element={<PrivateRoute><QuizPage /></PrivateRoute>} />
