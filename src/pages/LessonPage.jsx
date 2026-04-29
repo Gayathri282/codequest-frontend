@@ -479,16 +479,18 @@ export default function LessonPage() {
                 )}
               </div>
 
-              {/* Editor — bottom 58% (no inline preview) */}
-              <div style={{ flex:1, overflow:'hidden', minHeight:0, display:'flex', flexDirection:'column' }}>
-                <CodeEditor
-                  starterCode={session?.starterCode || defaultStarterCode}
-                  sessionId={id}
-                  inheritFromSessionId={prevSessionId}
-                  hidePreview
-                  onRun={setSplitPreview}
-                />
-              </div>
+                      {/* Editor — bottom 58% (no inline preview) */}
+        <div style={{ flex:1, overflow:'hidden', minHeight:0, display:'flex', flexDirection:'column' }}>
+          {session && (  // ← add this guard
+            <CodeEditor
+              starterCode={session?.starterCode || defaultStarterCode}
+              sessionId={id}
+              inheritFromSessionId={prevSessionId}
+              hidePreview
+              onRun={setSplitPreview}
+            />
+          )}
+        </div>
             </div>
 
             {/* Column resize drag handle */}
@@ -551,14 +553,16 @@ export default function LessonPage() {
 
         {/* CODE only (no video) */}
         {session?.type === 'CODE' && !hasVideo && (
-          <div style={{ flex:1, display:'flex', overflow:'hidden', minHeight:0 }}>
-            <CodeEditor
-              starterCode={session?.starterCode || defaultStarterCode}
-              sessionId={id}
-              inheritFromSessionId={prevSessionId}
-            />
-          </div>
-        )}
+  <div style={{ flex:1, display:'flex', overflow:'hidden', minHeight:0 }}>
+    {session && (  // ← add guard
+      <CodeEditor
+        starterCode={session?.starterCode || defaultStarterCode}
+        sessionId={id}
+        inheritFromSessionId={prevSessionId}
+      />
+    )}
+  </div>
+)}
 
         {/* Fallback for any unhandled type */}
         {session && !hasVideo && session.type !== 'DOCUMENT' && session.type !== 'CODE' && session.type !== 'QUIZ' && (
