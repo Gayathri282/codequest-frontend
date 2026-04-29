@@ -176,9 +176,19 @@ export default function LessonBuilder({ courseId, courseTitle = "Course", course
   const [saving,   setSaving]     = useState(false);
   const [error,    setError]      = useState('');
 
-  useEffect(() => { loadSessions(); }, [courseId]);
+  useEffect(() => {
+    if (!courseId) {
+      setSessions([]);
+      setLoading(false);
+      setError('No course selected (missing courseId). Go back and pick a course.');
+      return;
+    }
+    setError('');
+    loadSessions();
+  }, [courseId]);
 
   async function loadSessions() {
+    if (!courseId) return;
     setLoading(true);
     try {
       const res = await api.get(`/courses/${courseId}`);
@@ -188,7 +198,7 @@ export default function LessonBuilder({ courseId, courseTitle = "Course", course
   }
 
   function startEdit(session) {
-    setEditId(session.id);
+    setEditId(session._id || session.id);
     setForm({
       title:        session.title       || '',
       type:         session.type        || 'VIDEO',
@@ -214,13 +224,14 @@ export default function LessonBuilder({ courseId, courseTitle = "Course", course
 
   async function saveSession() {
     if (!form.title.trim()) { setError('Title is required'); return; }
+    if (!courseId) { setError('Missing courseId. Go back and select a course first.'); return; }
     console.log('courseId:', courseId);  // ← add this line
     console.log('form:', form);
     setSaving(true); setError('');
     try {
       if (editId) {
         const res = await api.patch(`/sessions/${editId}`, form);
-        setSessions(s => s.map(x => x._id || x.id === editId ? res.data : x));
+        setSessions(s => s.map(x => ((x._id || x.id) === editId ? res.data : x)));
       } else {
         const nextOrder = sessions.length + 1;
         const res = await api.post('/sessions', { ...form, courseId, order: nextOrder, isPublished: false });
@@ -236,14 +247,15 @@ export default function LessonBuilder({ courseId, courseTitle = "Course", course
     if (!confirm('Delete this session?')) return;
     try {
       await api.delete(`/sessions/${id}`);
-      setSessions(s => s.filter(x => x._id || x.id !== id));
+      setSessions(s => s.filter(x => ((x._id || x.id) !== id)));
     } catch { setError('Delete failed'); }
   }
 
   async function togglePublish(session) {
     try {
-      const res = await api.patch(`/sessions/${session.id}`, { isPublished: !session.isPublished });
-      setSessions(s => s.map(x => x.id === session.id ? res.data : x));
+      const id = session._id || session.id;
+      const res = await api.patch(`/sessions/${id}`, { isPublished: !session.isPublished });
+      setSessions(s => s.map(x => ((x._id || x.id) === id ? res.data : x)));
     } catch { setError('Update failed'); }
   }
 

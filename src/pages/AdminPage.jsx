@@ -41,6 +41,22 @@ const inp = {
 };
 const lbl = { fontSize:12, color:C.orange, fontWeight:800, display:'block', marginBottom:5, letterSpacing:.4 };
 
+function getCourseId(course) {
+  const raw = course?._id || course?.id || course?.courseId || course?.courseID || null;
+  if (typeof raw === 'string') return raw.trim() ? raw : null;
+  if (raw && typeof raw === 'object') {
+    if (typeof raw.$oid === 'string') return raw.$oid;
+    if (typeof raw.oid === 'string') return raw.oid;
+    if (typeof raw.id === 'string') return raw.id;
+    if (typeof raw._id === 'string') return raw._id;
+    if (typeof raw.toString === 'function') {
+      const s = raw.toString();
+      if (typeof s === 'string' && s !== '[object Object]' && s.trim()) return s.trim();
+    }
+  }
+  return null;
+}
+
 /* ─── Stat card ─── */
 function StatCard({ icon, value, label, color, trend }) {
   return (
@@ -170,7 +186,7 @@ function CoursesTab({ courses, setCourses }) {
           </>
         ) : (
           <LessonBuilder
-            courseId={lessonCourse._id || lessonCourse.id}
+            courseId={getCourseId(lessonCourse)}
             courseName={lessonCourse.title}
             onEditQuiz={s => setQuizSession(s)}
           />
@@ -183,8 +199,10 @@ function CoursesTab({ courses, setCourses }) {
     setSaving(true);
     try {
       if (editCourse) {
-        const r = await api.patch(`/courses/${editCourse.id}`, form);
-        setCourses(cs => cs.map(c => c.id === editCourse.id ? r.data : c));
+        const id = getCourseId(editCourse);
+        if (!id) throw new Error('Course is missing an id');
+        const r = await api.patch(`/courses/${id}`, form);
+        setCourses(cs => cs.map(c => (getCourseId(c) === id ? r.data : c)));
       } else {
         const r = await api.post('/courses', { ...form, order: courses.length + 1 });
         setCourses(cs => [...cs, r.data]);
@@ -205,16 +223,20 @@ function CoursesTab({ courses, setCourses }) {
 
   async function togglePublish(course) {
     try {
-      const r = await api.patch(`/courses/${course.id}`, { isLocked: !course.isLocked });
-      setCourses(cs => cs.map(c => c.id === course.id ? { ...c, isLocked: r.data.isLocked } : c));
+      const id = getCourseId(course);
+      if (!id) throw new Error('Course is missing an id');
+      const r = await api.patch(`/courses/${id}`, { isLocked: !course.isLocked });
+      setCourses(cs => cs.map(c => (getCourseId(c) === id ? { ...c, isLocked: r.data.isLocked } : c)));
     } catch(e) { alert('Failed to update'); }
   }
 
   async function deleteCourse(course) {
     if (!confirm(`Delete "${course.title}"? All sessions will be lost.`)) return;
     try {
-      await api.delete(`/courses/${course.id}`);
-      setCourses(cs => cs.filter(c => c.id !== course.id));
+      const id = getCourseId(course);
+      if (!id) throw new Error('Course is missing an id');
+      await api.delete(`/courses/${id}`);
+      setCourses(cs => cs.filter(c => getCourseId(c) !== id));
     } catch(e) { alert('Delete failed'); }
   }
 
@@ -292,7 +314,7 @@ function CoursesTab({ courses, setCourses }) {
 
       {/* Course list */}
       {courses.map(course => (
-        <div key={course.id} style={{ background:`linear-gradient(135deg,${course.color||C.cyan}12,#fff)`,
+        <div key={getCourseId(course) || course.slug || course.title} style={{ background:`linear-gradient(135deg,${course.color||C.cyan}12,#fff)`,
           border:`4px solid ${course.color||C.cyan}`, borderRadius:24,
           padding:20, marginBottom:14, display:'flex', alignItems:'center',
           gap:16, flexWrap:'wrap', boxShadow:`0 8px 0 ${course.color||C.cyan}55` }}>
@@ -313,7 +335,21 @@ function CoursesTab({ courses, setCourses }) {
             )}
           </div>
           <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
-            <Btn onClick={() => setLessonCourse(course)} color={C.cyan} textColor="#fff" sm>📚 Sessions</Btn>
+            <Btn
+              onClick={() => {
+                const id = getCourseId(course);
+                if (!id) {
+                  console.error('[AdminPage] Course missing id:', course);
+                  return alert('This course is missing an id. Check console for details.');
+                }
+                setLessonCourse(course);
+              }}
+              color={C.cyan}
+              textColor="#fff"
+              sm
+            >
+              📚 Sessions
+            </Btn>
             <Btn onClick={() => startEdit(course)} color="#EEF4FF" textColor={C.purple} sm>✏️ Edit</Btn>
             <Btn onClick={() => togglePublish(course)}
               color={course.isLocked ? C.lime : '#EEE'}
@@ -360,11 +396,11 @@ function LecturesTab({ courses }) {
                 🎯 Quiz Builder — {quizSession.title}
               </div>
             </div>
-            <QuizBuilder sessionId={quizSession.id} sessionTitle={quizSession.title} />
+            <QuizBuilder sessionId={quizSession._id || quizSession.id} sessionTitle={quizSession.title} />
           </>
         ) : (
           <LessonBuilder
-            courseId={selectedCourse.id}
+            courseId={getCourseId(selectedCourse)}
             courseName={selectedCourse.title}
             onEditQuiz={s => setQuizSession(s)}
           />
@@ -392,7 +428,7 @@ function LecturesTab({ courses }) {
             const total     = course.sessions?.length || 0;
             const published = course.sessions?.filter(s => s.isPublished)?.length || 0;
             return (
-              <div key={course.id} style={{
+              <div key={getCourseId(course) || course.slug || course.title} style={{
                 background:'#fff', border:`3px solid ${course.color||C.cyan}`,
                 borderRadius:20, padding:22, cursor:'pointer',
                 boxShadow:`0 6px 0 ${course.color||C.cyan}55`,
@@ -400,7 +436,14 @@ function LecturesTab({ courses }) {
               }}
                 onMouseEnter={e => e.currentTarget.style.transform='translateY(-3px)'}
                 onMouseLeave={e => e.currentTarget.style.transform='translateY(0)'}
-                onClick={() => setSelectedCourse(course)}
+                onClick={() => {
+                  const id = getCourseId(course);
+                  if (!id) {
+                    console.error('[AdminPage] Course missing id:', course);
+                    return alert('This course is missing an id. Check console for details.');
+                  }
+                  setSelectedCourse(course);
+                }}
               >
                 <div style={{ fontSize:44, marginBottom:8 }}>{course.emoji}</div>
                 <div style={{ fontFamily:FONT_HEAD, fontSize:18, color:course.color||C.cyan }}>{course.title}</div>
