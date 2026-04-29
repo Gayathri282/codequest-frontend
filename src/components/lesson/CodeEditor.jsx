@@ -473,7 +473,12 @@ useEffect(() => {
   useEffect(() => { if (adding) newNameRef.current?.focus(); }, [adding]);
 
   /* fire initial preview to parent on mount */
-  useEffect(() => { if (onRun) onRun(buildDoc(initial(), 0)); }, []); // eslint-disable-line
+  useEffect(() => {
+  const t = setTimeout(() => {
+    if (onRun) onRun(buildDoc(initial(), 0));
+  }, 100);
+  return () => clearTimeout(t);
+}, []);
 
   /* link interception from preview iframe — handles both inline and split preview */
   useEffect(() => {
