@@ -452,13 +452,15 @@ export default function CodeEditor({
   }, [sessionId, onRun]);
 
   // Remote save (cross-device) — debounced
-  useEffect(() => {
-    if (!sessionId) return;
-    const t = setTimeout(() => {
-      api.put(`/editor/draft/${sessionId}`, { files }).catch(() => {});
-    }, 6000);
-    return () => clearTimeout(t);
-  }, [files, sessionId]);
+  // In CodeEditor.jsx, change the remote save effect:
+useEffect(() => {
+  if (!sessionId) return;
+  const t = setTimeout(() => {
+    api.put(`/editor/draft/${sessionId}`, { files })
+      .catch(err => console.log('Draft save error:', err.response?.data));
+  }, 6000);
+  return () => clearTimeout(t);
+}, [files, sessionId]);
 
   /* fullscreen sync */
   useEffect(() => {
