@@ -41,7 +41,7 @@ export default function LessonPage() {
   const [missionOpen, setMissionOpen] = useState(false);
 
   // ── Split preview (right-column full-height when video + IDE) ────────
- const [splitPreview, setSplitPreview] = useState(defaultStarterCode);
+  const [splitPreview,    setSplitPreview]    = useState('');          // FIX 1: start empty
   const [splitFrac,       setSplitFrac]       = useState(50); // % width of left column
   const [isSplitDragging, setIsSplitDragging] = useState(false);
   const splitContainerRef = useRef(null);
@@ -96,6 +96,13 @@ export default function LessonPage() {
     setEarlyMsg('');
     setEarlyConfirm(false);
   }, [session?.id]);
+
+  // FIX 2: seed splitPreview from session.starterCode when session loads
+  useEffect(() => {
+    if (session?.starterCode && !splitPreview) {
+      setSplitPreview(session.starterCode);
+    }
+  }, [session?.id]); // eslint-disable-line
 
   // Redirect quiz sessions to the dedicated quiz page
   useEffect(() => {
@@ -479,18 +486,18 @@ export default function LessonPage() {
                 )}
               </div>
 
-                      {/* Editor — bottom 58% (no inline preview) */}
-        <div style={{ flex:1, overflow:'hidden', minHeight:0, display:'flex', flexDirection:'column' }}>
-          {session && (  // ← add this guard
-            <CodeEditor
-              starterCode={session?.starterCode || defaultStarterCode}
-              sessionId={id}
-              inheritFromSessionId={prevSessionId}
-              hidePreview
-              onRun={setSplitPreview}
-            />
-          )}
-        </div>
+              {/* Editor — bottom 58% (no inline preview) */}
+              <div style={{ flex:1, overflow:'hidden', minHeight:0, display:'flex', flexDirection:'column' }}>
+                {session && (
+                  <CodeEditor
+                    starterCode={session?.starterCode || defaultStarterCode}
+                    sessionId={id}
+                    inheritFromSessionId={prevSessionId}
+                    hidePreview
+                    onRun={setSplitPreview}
+                  />
+                )}
+              </div>
             </div>
 
             {/* Column resize drag handle */}
@@ -553,16 +560,16 @@ export default function LessonPage() {
 
         {/* CODE only (no video) */}
         {session?.type === 'CODE' && !hasVideo && (
-  <div style={{ flex:1, display:'flex', overflow:'hidden', minHeight:0 }}>
-    {session && (  // ← add guard
-      <CodeEditor
-        starterCode={session?.starterCode || defaultStarterCode}
-        sessionId={id}
-        inheritFromSessionId={prevSessionId}
-      />
-    )}
-  </div>
-)}
+          <div style={{ flex:1, display:'flex', overflow:'hidden', minHeight:0 }}>
+            {session && (
+              <CodeEditor
+                starterCode={session?.starterCode || defaultStarterCode}
+                sessionId={id}
+                inheritFromSessionId={prevSessionId}
+              />
+            )}
+          </div>
+        )}
 
         {/* Fallback for any unhandled type */}
         {session && !hasVideo && session.type !== 'DOCUMENT' && session.type !== 'CODE' && session.type !== 'QUIZ' && (
