@@ -166,11 +166,11 @@ function CoursesTab({ courses, setCourses }) {
                 🎯 Quiz Builder — {quizSession.title}
               </div>
             </div>
-            <QuizBuilder sessionId={quizSession._id} sessionTitle={quizSession.title} />
+            <QuizBuilder sessionId={quizSession._id || quizSession.id} sessionTitle={quizSession.title} />
           </>
         ) : (
           <LessonBuilder
-            courseId={lessonCourse._id}
+            courseId={lessonCourse._id || lessonCourse.id}
             courseName={lessonCourse.title}
             onEditQuiz={s => setQuizSession(s)}
           />

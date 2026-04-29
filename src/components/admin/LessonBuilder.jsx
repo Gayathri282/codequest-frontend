@@ -214,6 +214,8 @@ export default function LessonBuilder({ courseId, courseTitle = "Course", course
 
   async function saveSession() {
     if (!form.title.trim()) { setError('Title is required'); return; }
+    console.log('courseId:', courseId);  // ← add this line
+    console.log('form:', form);
     setSaving(true); setError('');
     try {
       if (editId) {
