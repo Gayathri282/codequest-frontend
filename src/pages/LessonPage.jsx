@@ -491,6 +491,7 @@ export default function LessonPage() {
                 {session && (
                   <CodeEditor
                     starterCode={session?.starterCode || defaultStarterCode}
+                    starterFiles={session?.starterFiles || null}
                     sessionId={id}
                     inheritFromSessionId={prevSessionId}
                     hidePreview
@@ -564,6 +565,7 @@ export default function LessonPage() {
             {session && (
               <CodeEditor
                 starterCode={session?.starterCode || defaultStarterCode}
+                starterFiles={session?.starterFiles || null}
                 sessionId={id}
                 inheritFromSessionId={prevSessionId}
               />

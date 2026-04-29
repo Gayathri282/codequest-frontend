@@ -6,6 +6,7 @@ import { useState, useEffect, useRef } from 'react';
 import api from '../../utils/api';
 import Btn from '../shared/Btn';
 import XpBar from '../shared/XpBar';
+import CodeEditor from '../lesson/CodeEditor';
 
 const C = {
   orange: '#FF6B35', cyan: '#00C8E8', pink: '#FF4FCB',
@@ -24,7 +25,7 @@ const SESSION_TYPES = [
 const EMPTY_FORM = {
   title: '', type: 'VIDEO', durationMins: 5, xpReward: 50, coinsReward: 5,
   videoUrl: '', videoThumb: '', hasIde: true, missionText: '',
-  docContent: '', starterCode: '', solutionCode: '',
+  docContent: '', starterCode: '', starterFiles: null, solutionCode: '',
 };
 
 const inp = {
@@ -176,6 +177,8 @@ export default function LessonBuilder({ courseId, courseTitle = "Course", course
   const [saving,   setSaving]     = useState(false);
   const [error,    setError]      = useState('');
 
+  const useStarterFiles = Array.isArray(form.starterFiles) && form.starterFiles.length > 0;
+
   useEffect(() => {
     if (!courseId) {
       setSessions([]);
@@ -211,6 +214,7 @@ export default function LessonBuilder({ courseId, courseTitle = "Course", course
       missionText:  session.missionText || '',
       docContent:   session.docContent  || '',
       starterCode:  session.starterCode || '',
+      starterFiles: session.starterFiles || null,
       solutionCode: session.solutionCode|| '',
     });
     setShowAdd(true);
@@ -394,12 +398,48 @@ export default function LessonBuilder({ courseId, courseTitle = "Course", course
                 </span>
               </div>
               {form.hasIde && (
-                <div style={{ marginBottom: 12 }}>
-                  <label style={lbl}>Starter Code (pre-loaded in the editor)</label>
-                  <textarea style={{ ...inp, height: 140, fontFamily: 'monospace', fontSize: 12, background: '#0D1117', color: '#C9D1D9', lineHeight: 1.6 }}
-                    placeholder="<!DOCTYPE html>&#10;<html>&#10;  <body>&#10;    <!-- Student codes along here -->&#10;  </body>&#10;</html>"
-                    value={form.starterCode} onChange={e => setForm(f => ({ ...f, starterCode: e.target.value }))} />
-                </div>
+                <>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 10, flexWrap: 'wrap' }}>
+                    <label style={{ ...lbl, marginBottom: 0 }}>Starter (for IDE)</label>
+                    <Btn
+                      sm
+                      color={useStarterFiles ? C.lime : '#EEF4FF'}
+                      textColor={useStarterFiles ? C.txt : C.purple}
+                      onClick={() => setForm(f => ({
+                        ...f,
+                        starterFiles: useStarterFiles
+                          ? null
+                          : (Array.isArray(f.starterFiles) && f.starterFiles.length
+                            ? f.starterFiles
+                            : [{ name: 'index.html', content: f.starterCode || '' }]),
+                      }))}
+                    >
+                      {useStarterFiles ? 'Multi-file: ON' : 'Multi-file: OFF'}
+                    </Btn>
+                  </div>
+
+                  {useStarterFiles ? (
+                    <div style={{ marginBottom: 12, border: `2px solid ${C.cyan}33`, borderRadius: 16, overflow: 'hidden' }}>
+                      <CodeEditor
+                        key={`starter-${editId || 'new'}`}
+                        starterCode={form.starterCode || ''}
+                        starterFiles={form.starterFiles}
+                        sessionId={null}
+                        onFilesChange={files => setForm(f => ({ ...f, starterFiles: files }))}
+                      />
+                      <div style={{ padding: '8px 12px', fontSize: 11, color: C.muted, background: '#F7FCFF' }}>
+                        Tip: add `styles.css`, `script.js`, and images like `cat.jpg` (upload as Data URL).
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ marginBottom: 12 }}>
+                      <label style={lbl}>Starter Code (single file)</label>
+                      <textarea style={{ ...inp, height: 140, fontFamily: 'monospace', fontSize: 12, background: '#0D1117', color: '#C9D1D9', lineHeight: 1.6 }}
+                        placeholder="<!DOCTYPE html>&#10;<html>&#10;  <body>&#10;    <!-- Student codes along here -->&#10;  </body>&#10;</html>"
+                        value={form.starterCode} onChange={e => setForm(f => ({ ...f, starterCode: e.target.value }))} />
+                    </div>
+                  )}
+                </>
               )}
             </>
           )}
@@ -423,12 +463,46 @@ export default function LessonBuilder({ courseId, courseTitle = "Course", course
                   placeholder="Describe the challenge..."
                   value={form.missionText} onChange={e => setForm(f => ({ ...f, missionText: e.target.value }))} />
               </div>
-              <div style={{ marginBottom: 12 }}>
-                <label style={lbl}>Starter Code (pre-loaded in the editor)</label>
-                <textarea style={{ ...inp, height: 140, fontFamily: 'monospace', fontSize: 12, background: '#0D1117', color: '#C9D1D9', lineHeight: 1.6 }}
-                  placeholder="<!DOCTYPE html>&#10;<html>&#10;  <body>&#10;    <!-- Student completes this -->&#10;  </body>&#10;</html>"
-                  value={form.starterCode} onChange={e => setForm(f => ({ ...f, starterCode: e.target.value }))} />
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 10, flexWrap: 'wrap' }}>
+                <label style={{ ...lbl, marginBottom: 0 }}>Starter</label>
+                <Btn
+                  sm
+                  color={useStarterFiles ? C.lime : '#EEF4FF'}
+                  textColor={useStarterFiles ? C.txt : C.purple}
+                  onClick={() => setForm(f => ({
+                    ...f,
+                    starterFiles: useStarterFiles
+                      ? null
+                      : (Array.isArray(f.starterFiles) && f.starterFiles.length
+                        ? f.starterFiles
+                        : [{ name: 'index.html', content: f.starterCode || '' }]),
+                  }))}
+                >
+                  {useStarterFiles ? 'Multi-file: ON' : 'Multi-file: OFF'}
+                </Btn>
               </div>
+
+              {useStarterFiles ? (
+                <div style={{ marginBottom: 12, border: `2px solid ${C.cyan}33`, borderRadius: 16, overflow: 'hidden' }}>
+                  <CodeEditor
+                    key={`starter-${editId || 'new'}`}
+                    starterCode={form.starterCode || ''}
+                    starterFiles={form.starterFiles}
+                    sessionId={null}
+                    onFilesChange={files => setForm(f => ({ ...f, starterFiles: files }))}
+                  />
+                  <div style={{ padding: '8px 12px', fontSize: 11, color: C.muted, background: '#F7FCFF' }}>
+                    Tip: use `index.html`, `styles.css`, `script.js`, and images; the preview auto-inlines CSS/JS and replaces `src=&quot;file.png&quot;` with the image Data URL.
+                  </div>
+                </div>
+              ) : (
+                <div style={{ marginBottom: 12 }}>
+                  <label style={lbl}>Starter Code (single file)</label>
+                  <textarea style={{ ...inp, height: 140, fontFamily: 'monospace', fontSize: 12, background: '#0D1117', color: '#C9D1D9', lineHeight: 1.6 }}
+                    placeholder="<!DOCTYPE html>&#10;<html>&#10;  <body>&#10;    <!-- Student completes this -->&#10;  </body>&#10;</html>"
+                    value={form.starterCode} onChange={e => setForm(f => ({ ...f, starterCode: e.target.value }))} />
+                </div>
+              )}
               <div style={{ marginBottom: 14 }}>
                 <label style={lbl}>Solution Code (admin reference only — never shown to student)</label>
                 <textarea style={{ ...inp, height: 100, fontFamily: 'monospace', fontSize: 12, background: '#0D1117', color: '#C9D1D9', lineHeight: 1.6 }}

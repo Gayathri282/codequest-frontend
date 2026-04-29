@@ -353,8 +353,21 @@ export function extractTitle(html) {
   return m ? m[1].trim() : null;
 }
 
-function loadSaved(sessionId, starterCode, inheritFromSessionId) {
-  if (!sessionId) return [{ name:'index.html', content: starterCode || '' }];
+function normalizeFiles(files) {
+  if (!Array.isArray(files)) return null;
+  const out = files
+    .filter(f => f && typeof f === 'object')
+    .map(f => ({
+      name: typeof f.name === 'string' ? f.name : 'index.html',
+      content: typeof f.content === 'string' ? f.content : (f.content == null ? '' : String(f.content)),
+    }))
+    .filter(f => typeof f.name === 'string' && f.name.trim().length > 0);
+  return out.length ? out : null;
+}
+
+function loadSaved(sessionId, starterCode, starterFiles, inheritFromSessionId) {
+  const normalizedStarterFiles = normalizeFiles(starterFiles);
+  if (!sessionId) return normalizedStarterFiles || [{ name:'index.html', content: starterCode || '' }];
   let raw = getEditorDraft(sessionId);
   if (!raw && inheritFromSessionId) raw = getEditorDraft(inheritFromSessionId);
   if (Array.isArray(raw) && raw.length) return raw;
@@ -366,17 +379,19 @@ function loadSaved(sessionId, starterCode, inheritFromSessionId) {
     if (raw.js)   out.push({ name:'script.js',  content: raw.js });
     if (out.length) return out;
   }
-  return [{ name:'index.html', content: starterCode || '' }];
+  return normalizedStarterFiles || [{ name:'index.html', content: starterCode || '' }];
 }
 
 export default function CodeEditor({
   starterCode = '',
+  starterFiles = null,
   sessionId,
   inheritFromSessionId = null,
   hidePreview = false,
-  onRun = null
+  onRun = null,
+  onFilesChange = null,
 }) {
-  const initial = () => loadSaved(sessionId, starterCode, inheritFromSessionId);
+  const initial = () => loadSaved(sessionId, starterCode, starterFiles, inheritFromSessionId);
 
   const [files,     setFiles]     = useState(initial);
   const [activeIdx, setActiveIdx] = useState(0);
@@ -405,7 +420,7 @@ export default function CodeEditor({
   // Reset state when switching sessions
   useEffect(() => {
     remoteLoaded.current = false;
-    const next = loadSaved(sessionId, starterCode, inheritFromSessionId);
+    const next = loadSaved(sessionId, starterCode, starterFiles, inheritFromSessionId);
     setFiles(next);
     setActiveIdx(0);
     const doc = buildDoc(next, 0);
@@ -413,6 +428,11 @@ export default function CodeEditor({
     if (onRun) onRun(doc);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
+
+  useEffect(() => {
+    if (!onFilesChange) return;
+    onFilesChange(files);
+  }, [files, onFilesChange]);
 
   /* auto-save */
   useEffect(() => {
