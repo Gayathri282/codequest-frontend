@@ -218,7 +218,7 @@ export default function LessonBuilder({ courseId, courseTitle = "Course", course
     try {
       if (editId) {
         const res = await api.patch(`/sessions/${editId}`, form);
-        setSessions(s => s.map(x => x.id === editId ? res.data : x));
+        setSessions(s => s.map(x => x._id || x.id === editId ? res.data : x));
       } else {
         const nextOrder = sessions.length + 1;
         const res = await api.post('/sessions', { ...form, courseId, order: nextOrder, isPublished: false });
@@ -234,7 +234,7 @@ export default function LessonBuilder({ courseId, courseTitle = "Course", course
     if (!confirm('Delete this session?')) return;
     try {
       await api.delete(`/sessions/${id}`);
-      setSessions(s => s.filter(x => x.id !== id));
+      setSessions(s => s.filter(x => x._id || x.id !== id));
     } catch { setError('Delete failed'); }
   }
 
@@ -253,7 +253,7 @@ export default function LessonBuilder({ courseId, courseTitle = "Course", course
     const reordered = arr.map((s, i) => ({ ...s, order: i + 1 }));
     setSessions(reordered);
     try {
-      await api.patch('/sessions/reorder/bulk', reordered.map(s => ({ id: s.id, order: s.order })));
+      await api.patch('/sessions/reorder/bulk', reordered.map(s => ({ id: s._id || s.id, order: s.order })));
     } catch { setError('Reorder failed — refresh to sync'); }
   }
 
@@ -452,7 +452,7 @@ export default function LessonBuilder({ courseId, courseTitle = "Course", course
         sessions.map((s, idx) => {
           const tc = typeConf(s.type);
           return (
-            <div key={s.id} style={{
+            <div key={s._id || s.id} style={{
               background: `linear-gradient(135deg,${tc.color}14,#fff)`,
               border: `4px solid ${tc.color}`,
               borderRadius: 22, padding: '16px 20px', marginBottom: 14,
@@ -502,7 +502,7 @@ export default function LessonBuilder({ courseId, courseTitle = "Course", course
                 {s.type === 'QUIZ' && onEditQuiz && (
                   <Btn onClick={() => onEditQuiz(s)} color="#FFF0E8" textColor={C.orange} sm>🎯 Questions</Btn>
                 )}
-                <Btn onClick={() => deleteSession(s.id)} color="#FFEEEE" textColor={C.red} sm>🗑️</Btn>
+                <Btn onClick={() => deleteSession(s._id || s.id)} color="#FFEEEE" textColor={C.red} sm>🗑️</Btn>
               </div>
             </div>
           );
