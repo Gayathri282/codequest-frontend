@@ -472,13 +472,17 @@ useEffect(() => {
   /* focus new-file input */
   useEffect(() => { if (adding) newNameRef.current?.focus(); }, [adding]);
 
-  /* fire initial preview to parent on mount */
-  useEffect(() => {
+  // WITH this — fire immediately on files change too:
+// Replace the mount useEffect with this:
+useEffect(() => {
+  const doc = buildDoc(files, 0);
+  setPreview(doc);
+  // Delay onRun slightly so parent iframe is mounted
   const t = setTimeout(() => {
-    if (onRun) onRun(buildDoc(initial(), 0));
-  }, 100);
+    if (onRun) onRun(doc);
+  }, 300);
   return () => clearTimeout(t);
-}, []);
+}, []); // eslint-disable-line
 
   /* link interception from preview iframe — handles both inline and split preview */
   useEffect(() => {

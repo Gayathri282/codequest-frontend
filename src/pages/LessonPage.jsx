@@ -41,7 +41,7 @@ export default function LessonPage() {
   const [missionOpen, setMissionOpen] = useState(false);
 
   // ── Split preview (right-column full-height when video + IDE) ────────
-  const [splitPreview, setSplitPreview] = useState('');
+ const [splitPreview, setSplitPreview] = useState(defaultStarterCode);
   const [splitFrac,       setSplitFrac]       = useState(50); // % width of left column
   const [isSplitDragging, setIsSplitDragging] = useState(false);
   const splitContainerRef = useRef(null);
