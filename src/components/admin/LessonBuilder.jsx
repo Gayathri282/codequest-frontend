@@ -58,7 +58,7 @@ function VideoUploadField({ videoUrl, onChange }) {
       // Use XMLHttpRequest so we can show real upload progress
       const result = await new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
-        xhr.open('POST', `${import.meta.env.VITE_API_URL || ''}/api/video/upload`);
+        xhr.open('POST', `${import.meta.env.VITE_API_URL || ''}/video/upload`);
         const token = localStorage.getItem('cq_token');
         if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
         xhr.upload.onprogress = ev => {
