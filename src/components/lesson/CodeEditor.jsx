@@ -24,7 +24,6 @@ function extIcon(name = '') {
   return '📄';
 }
 
-// Injected into every preview — intercepts link clicks and routes via postMessage
 const LINK_INTERCEPTOR = [
   '<script>',
   '(function(){',
@@ -192,7 +191,6 @@ const JS_COMPLETIONS = [
   'trim','replace','toUpperCase','toLowerCase','substring','startsWith','endsWith',
 ];
 
-// Returns the kind's label color for the dropdown badge
 function kindColor(kind) {
   if (kind === 'tag')   return '#7ED957';
   if (kind === 'attr')  return '#00C8E8';
@@ -202,15 +200,14 @@ function kindColor(kind) {
   return '#B0C8E0';
 }
 
-// Approximate caret position in viewport coords (fixed dropdown placement)
 function getCaretPos(ta) {
   const rect  = ta.getBoundingClientRect();
   const text  = ta.value.substring(0, ta.selectionStart);
   const lines = text.split('\n');
   const row   = lines.length - 1;
   const col   = lines[row].length;
-  const LINE_H = 24;   // fontSize:13 * lineHeight:1.8 ≈ 23.4
-  const CHAR_W = 7.8;  // Courier New 13px
+  const LINE_H = 24;
+  const CHAR_W = 7.8;
   const PAD_T  = 14;
   const PAD_L  = 18;
   return {
@@ -219,14 +216,12 @@ function getCaretPos(ta) {
   };
 }
 
-// Compute autocomplete suggestions based on text, cursor, and file type
 function computeAC(text, pos, filename) {
   const before = text.substring(0, pos);
   const isHtml = /\.html?$/i.test(filename);
   const isCss  = /\.css$/i.test(filename);
   const isJs   = /\.js$/i.test(filename);
 
-  // Context detection inside .html files
   let ctx = isHtml ? 'html' : isCss ? 'css' : isJs ? 'js' : 'html';
   if (isHtml) {
     const sO = before.lastIndexOf('<style'), sC = before.lastIndexOf('</style');
@@ -236,7 +231,6 @@ function computeAC(text, pos, filename) {
   }
 
   if (ctx === 'html') {
-    // Tag name after <
     const tagM = before.match(/<([a-zA-Z]*)$/);
     if (tagM && tagM[1].length > 0) {
       const p = tagM[1].toLowerCase();
@@ -245,7 +239,6 @@ function computeAC(text, pos, filename) {
         insert: HTML_SNIPS[t] || (SELF_CLOSE.has(t) ? `${t}>` : `${t}>$C</${t}>`),
       }));
     }
-    // Attribute name after <tagname ...attr
     const attrM = before.match(/<(\w+)(?:\s[\w-]*(?:=(?:"[^"]*"|'[^']*'|\S*))?)*\s([\w-]*)$/);
     if (attrM) {
       const tag = attrM[1].toLowerCase();
@@ -259,7 +252,6 @@ function computeAC(text, pos, filename) {
   }
 
   if (ctx === 'css') {
-    // Property name after { ; or newline
     const propM = before.match(/(?:[{;,\n]|^)\s*([\w-]+)$/);
     if (propM && propM[1].length >= 1) {
       const p = propM[1];
@@ -267,7 +259,6 @@ function computeAC(text, pos, filename) {
         label: x, replace: p, insert: x + ': ', kind: 'prop',
       }));
     }
-    // Value after property:
     const valM = before.match(/([\w-]+)\s*:\s*([\w#%.-]*)$/);
     if (valM) {
       const vals = CSS_VALUES[valM[1]] || [];
@@ -292,60 +283,82 @@ function computeAC(text, pos, filename) {
 
 export function buildDoc(files, activeIdx) {
   const active = files[activeIdx];
-  const css    = files.filter(f => /\.css$/i.test(f.name));
-  const js     = files.filter(f => /\.js$/i.test(f.name));
-  const imgs   = files.filter(f => isImage(f.name) && f.content);
+  const editableFiles = files.filter(f => !f.isAsset);
+  const assetFiles    = files.filter(f =>  f.isAsset);
+
+  // Only include CSS/JS files that actually have non-empty content.
+  // An empty <script> injected alongside the HTML's own inline <script>
+  // can silently prevent the inline script from running in some browsers.
+  const css  = editableFiles.filter(f => /\.css$/i.test(f.name) && f.content?.trim());
+  const js   = editableFiles.filter(f => /\.js$/i.test(f.name)  && f.content?.trim());
+  const imgs = editableFiles.filter(f => isImage(f.name) && f.content);
 
   let base;
   if (active && /\.html?$/i.test(active.name)) {
     base = active;
   } else {
-    base = files.find(f => /^index\.html?$/i.test(f.name))
-        || files.find(f => /\.html?$/i.test(f.name));
+    base = editableFiles.find(f => /^index\.html?$/i.test(f.name))
+        || editableFiles.find(f => /\.html?$/i.test(f.name));
   }
 
   if (!base) {
     return [
-      '<!DOCTYPE html><html><head><meta charset="utf-8"><style>',
-      css.map(f => f.content).join('\n'),
-      '</style></head><body>',
+      '<!DOCTYPE html><html><head><meta charset="utf-8">',
+      css.length ? `<style>\n${css.map(f => f.content).join('\n')}\n</style>` : '',
+      '</head><body>',
       active?.content || '',
-      '<script>', js.map(f => f.content).join('\n'), '<\/script>', // eslint-disable-line
+      js.length ? '<script>\n' + js.map(f => f.content).join('\n') + '\n<\/script>' : '',
       LINK_INTERCEPTOR,
       '</body></html>',
-    ].join('');
+    ].join('\n');
   }
 
   let doc = base.content;
 
   if (css.length) {
-    const block = `<style>\n${css.map(f => f.content).join('\n')}\n</style>`;
-    doc = /<\/head>/i.test(doc)
-      ? doc.replace(/<\/head>/i, block + '\n</head>')
-      : block + '\n' + doc;
+    const cssBlock = `<style>\n${css.map(f => f.content).join('\n')}\n</style>`;
+    // If HTML already has an inline <style>, replace it instead of injecting
+    // a second one — prevents cascade/specificity surprises.
+    if (/<style[\s>]/i.test(doc)) {
+      doc = doc.replace(/<style[^>]*>[\s\S]*?<\/style>/i, cssBlock);
+    } else {
+      doc = /<\/head>/i.test(doc)
+        ? doc.replace(/<\/head>/i, cssBlock + '\n</head>')
+        : cssBlock + '\n' + doc;
+    }
   }
 
   if (js.length) {
     const jsContent = js.map(f => f.content).join('\n');
-    const block = '<script>\n' + jsContent + '\n<\/script>'; // eslint-disable-line
-    doc = /<\/body>/i.test(doc)
-      ? doc.replace(/<\/body>/i, block + '\n</body>')
-      : doc + '\n' + block;
+    const jsBlock = '<script>\n' + jsContent + '\n<\/script>'; // eslint-disable-line
+    // If HTML already has an inline <script> (no src= attr), replace its
+    // content instead of stacking a second script tag.
+    if (/<script(?![^>]*\bsrc\b)[^>]*>/i.test(doc)) {
+      doc = doc.replace(/<script(?![^>]*\bsrc\b)[^>]*>[\s\S]*?<\/script>/i, jsBlock);
+    } else {
+      doc = /<\/body>/i.test(doc)
+        ? doc.replace(/<\/body>/i, jsBlock + '\n</body>')
+        : doc + '\n' + jsBlock;
+    }
   }
 
-  // Replace image src references with base64 data URLs
   for (const img of imgs) {
     const esc = img.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     doc = doc.replace(new RegExp(`(src=["'])${esc}(["'])`, 'gi'), `$1${img.content}$2`);
   }
 
-  // Inject link interceptor
+  for (const asset of assetFiles) {
+    const esc = asset.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    doc = doc.replace(new RegExp(`(src=["'])${esc}(["'])`, 'gi'), `$1${asset.content}$2`);
+  }
+
   doc = /<\/body>/i.test(doc)
     ? doc.replace(/<\/body>/i, LINK_INTERCEPTOR + '\n</body>')
     : doc + '\n' + LINK_INTERCEPTOR;
 
   return doc;
 }
+
 
 export function extractTitle(html) {
   if (!html) return null;
@@ -358,28 +371,60 @@ function normalizeFiles(files) {
   const out = files
     .filter(f => f && typeof f === 'object')
     .map(f => ({
-      name: typeof f.name === 'string' ? f.name : 'index.html',
+      name:    typeof f.name === 'string' ? f.name : 'index.html',
       content: typeof f.content === 'string' ? f.content : (f.content == null ? '' : String(f.content)),
+      ...(f.isAsset ? { isAsset: true } : {}),
     }))
     .filter(f => typeof f.name === 'string' && f.name.trim().length > 0);
   return out.length ? out : null;
 }
 
+// ── loadSaved: pulls draft from localStorage, merges with starterFiles ──
+// Asset files (isAsset:true) are always taken fresh from props.
+// Draft content is merged INTO starter files so CSS/JS tabs always appear.
 function loadSaved(sessionId, starterCode, starterFiles, inheritFromSessionId) {
   const normalizedStarterFiles = normalizeFiles(starterFiles);
-  if (!sessionId) return normalizedStarterFiles || [{ name:'index.html', content: starterCode || '' }];
+  const assetFiles       = (normalizedStarterFiles || []).filter(f =>  f.isAsset);
+  const editableStarters = (normalizedStarterFiles || []).filter(f => !f.isAsset);
+
+  if (!sessionId) {
+    return editableStarters.length
+      ? [...editableStarters, ...assetFiles]
+      : [{ name:'index.html', content: starterCode || '' }, ...assetFiles];
+  }
+
   let raw = getEditorDraft(sessionId);
   if (!raw && inheritFromSessionId) raw = getEditorDraft(inheritFromSessionId);
-  if (Array.isArray(raw) && raw.length) return raw;
-  if (typeof raw === 'string' && raw) return [{ name:'index.html', content: raw }];
-  if (raw && typeof raw === 'object') {
+
+  let draftEditable = null;
+  if (Array.isArray(raw) && raw.length) {
+    draftEditable = raw.filter(f => !f.isAsset);
+  } else if (typeof raw === 'string' && raw) {
+    draftEditable = [{ name:'index.html', content: raw }];
+  } else if (raw && typeof raw === 'object') {
     const out = [];
     if (raw.html) out.push({ name:'index.html', content: raw.html });
     if (raw.css)  out.push({ name:'styles.css', content: raw.css });
     if (raw.js)   out.push({ name:'script.js',  content: raw.js });
-    if (out.length) return out;
+    if (out.length) draftEditable = out;
   }
-  return normalizedStarterFiles || [{ name:'index.html', content: starterCode || '' }];
+
+  if (draftEditable && editableStarters.length) {
+    // Merge draft content INTO starter files so CSS/JS tabs always appear.
+    // Draft content wins for files that exist in both sets.
+    const draftMap = new Map(draftEditable.map(f => [f.name, f.content]));
+    const merged = editableStarters.map(f =>
+      draftMap.has(f.name) ? { ...f, content: draftMap.get(f.name) } : f
+    );
+    // Keep any extra files the student added that aren't in the starter set
+    const starterNames = new Set(editableStarters.map(f => f.name));
+    const extras = draftEditable.filter(f => !starterNames.has(f.name));
+    return [...merged, ...extras, ...assetFiles];
+  }
+
+  const editable = draftEditable
+    || (editableStarters.length ? editableStarters : [{ name:'index.html', content: starterCode || '' }]);
+  return [...editable, ...assetFiles];
 }
 
 export default function CodeEditor({
@@ -401,10 +446,9 @@ export default function CodeEditor({
   const [newName,   setNewName]   = useState('');
   const [renameIdx, setRenameIdx] = useState(null);
   const [previewFs, setPreviewFs] = useState(false);
-  const [previewH,  setPreviewH]  = useState(36);   // % of container height
-  const [previewW,  setPreviewW]  = useState(null);  // px, null = full width
-  const [isDragging, setIsDragging] = useState(null); // null | 'v' | 'h'
-  // Autocomplete
+  const [previewH,  setPreviewH]  = useState(36);
+  const [previewW,  setPreviewW]  = useState(null);
+  const [isDragging, setIsDragging] = useState(null);
   const [acList, setAcList] = useState([]);
   const [acIdx,  setAcIdx]  = useState(0);
   const [acPos,  setAcPos]  = useState({ top: 0, left: 0 });
@@ -414,38 +458,66 @@ export default function CodeEditor({
   const previewWrap   = useRef(null);
   const previewArea   = useRef(null);
   const textareaRef   = useRef(null);
-  const pendingCursor = useRef(null); // cursor position to restore after AC insertion
+  const pendingCursor = useRef(null);
   const remoteLoaded  = useRef(false);
+
+  // ── FIX: refs that always hold the latest values, preventing stale closures ──
+  // run(), onMsg, and remote-load callbacks all read from these refs so they
+  // never operate on a snapshot of state from a previous render.
+  const filesRef     = useRef(files);
+  const activeIdxRef = useRef(activeIdx);
+  const onRunRef     = useRef(onRun);
+
+  useEffect(() => { filesRef.current     = files;     }, [files]);
+  useEffect(() => { activeIdxRef.current = activeIdx; }, [activeIdx]);
+  useEffect(() => { onRunRef.current     = onRun;     }, [onRun]);
 
   // Reset state when switching sessions
   useEffect(() => {
     remoteLoaded.current = false;
     const next = loadSaved(sessionId, starterCode, starterFiles, inheritFromSessionId);
+    filesRef.current = next;          // sync ref immediately so run() sees it right away
     setFiles(next);
     setActiveIdx(0);
+    activeIdxRef.current = 0;
     const doc = buildDoc(next, 0);
     setPreview(doc);
-    if (onRun) onRun(doc);
+    if (onRunRef.current) onRunRef.current(doc);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
+
+  // When starterFiles changes (e.g. imageAssets CDN URLs arrive), refresh asset files
+  // without overwriting the student's editable draft
+  useEffect(() => {
+    setFiles(prev => {
+      const normalized = normalizeFiles(starterFiles) || [];
+      const freshAssets = normalized.filter(f => f.isAsset);
+      if (!freshAssets.length) return prev;
+      const nonAssets = prev.filter(f => !f.isAsset);
+      const next = [...nonAssets, ...freshAssets];
+      filesRef.current = next;
+      return next;
+    });
+  }, [starterFiles]); // eslint-disable-line
 
   useEffect(() => {
     if (!onFilesChange) return;
     onFilesChange(files);
   }, [files, onFilesChange]);
 
-  /* auto-save */
+  // Auto-save (localStorage) — only editable files, not asset files
   useEffect(() => {
     if (!sessionId) return;
     const t = setTimeout(() => {
-      setEditorDraft(sessionId, files);
+      const toSave = files.filter(f => !f.isAsset);
+      setEditorDraft(sessionId, toSave);
       setSaved(true);
       setTimeout(() => setSaved(false), 1500);
     }, 2000);
     return () => clearTimeout(t);
   }, [files, sessionId]);
 
-  // Remote load (cross-device) — only if this session has no local draft yet.
+  // Remote load (cross-device)
   useEffect(() => {
     if (!sessionId) return;
     if (remoteLoaded.current) return;
@@ -457,118 +529,119 @@ export default function CodeEditor({
         const remoteFiles = res.data?.files;
         if (cancelled) return;
         if (Array.isArray(remoteFiles) && remoteFiles.length) {
-          setFiles(remoteFiles);
+          const normalized = normalizeFiles(starterFiles) || [];
+          const freshAssets = normalized.filter(f => f.isAsset);
+          const merged = [...remoteFiles.filter(f => !f.isAsset), ...freshAssets];
+          // Sync ref immediately — don't wait for the setFiles re-render
+          filesRef.current = merged;
+          setFiles(merged);
           setActiveIdx(0);
-          const doc = buildDoc(remoteFiles, 0);
+          activeIdxRef.current = 0;
+          // Build from the local variable, not from state (state is still stale here)
+          const doc = buildDoc(merged, 0);
           setPreview(doc);
-          if (onRun) onRun(doc);
-          setEditorDraft(sessionId, remoteFiles);
+          if (onRunRef.current) onRunRef.current(doc);
+          setEditorDraft(sessionId, remoteFiles.filter(f => !f.isAsset));
         }
       })
       .catch(() => {})
       .finally(() => { remoteLoaded.current = true; });
 
     return () => { cancelled = true; };
-  }, [sessionId, onRun]);
+  }, [sessionId]); // eslint-disable-line
 
-  // Remote save (cross-device) — debounced
-  // In CodeEditor.jsx, change the remote save effect:
-useEffect(() => {
-  if (!sessionId) return;
-  const t = setTimeout(() => {
-    api.put(`/editor/draft/${sessionId}`, { files })
-      .catch(err => console.log('Draft save error:', err.response?.data));
-  }, 6000);
-  return () => clearTimeout(t);
-}, [files, sessionId]);
+  // Remote save (cross-device) — only editable files
+  useEffect(() => {
+    if (!sessionId) return;
+    const t = setTimeout(() => {
+      const toSave = files.filter(f => !f.isAsset);
+      api.put(`/editor/draft/${sessionId}`, { files: toSave })
+        .catch(err => console.log('Draft save error:', err.response?.data));
+    }, 6000);
+    return () => clearTimeout(t);
+  }, [files, sessionId]);
 
-  /* fullscreen sync */
   useEffect(() => {
     const h = () => setPreviewFs(!!document.fullscreenElement);
     document.addEventListener('fullscreenchange', h);
     return () => document.removeEventListener('fullscreenchange', h);
   }, []);
 
-  /* focus new-file input */
   useEffect(() => { if (adding) newNameRef.current?.focus(); }, [adding]);
 
-  // WITH this — fire immediately on files change too:
-// Replace the mount useEffect with this:
-useEffect(() => {
-  const doc = buildDoc(files, 0);
-  setPreview(doc);
-  // Delay onRun slightly so parent iframe is mounted
-  const t = setTimeout(() => {
-    if (onRun) onRun(doc);
-  }, 300);
-  return () => clearTimeout(t);
-}, []); // eslint-disable-line
-
-  /* link interception from preview iframe — handles both inline and split preview */
   useEffect(() => {
     function onMsg(e) {
       if (e.data?.type === 'cq-ext') {
         window.open(e.data.href, '_blank', 'noopener,noreferrer');
       } else if (e.data?.type === 'cq-int') {
         const fname = (e.data.href || '').split('?')[0].split('#')[0];
-        const idx = files.findIndex(f => f.name === fname);
+        // Read from ref so we always have the latest files list
+        const idx = filesRef.current.findIndex(f => f.name === fname);
         if (idx >= 0) {
           setActiveIdx(idx);
-          const doc = buildDoc(files, idx);
+          activeIdxRef.current = idx;
+          const doc = buildDoc(filesRef.current, idx);
           setPreview(doc);
-          if (onRun) onRun(doc);
+          if (onRunRef.current) onRunRef.current(doc);
         }
       }
     }
     window.addEventListener('message', onMsg);
     return () => window.removeEventListener('message', onMsg);
-  }, [files, onRun]);
+  }, []); // no deps needed — always reads from refs
 
+  // ── run: reads from refs so it's never stale, no matter when it's called ──
   function run() {
-    const doc = buildDoc(files, activeIdx);
+    const doc = buildDoc(filesRef.current, activeIdxRef.current);
     setPreview(doc);
-    if (onRun) onRun(doc);
-  }
-
-  function reset() {
-    const next = [{ name:'index.html', content: starterCode }];
-    setFiles(next); setActiveIdx(0);
-    const doc = buildDoc(next, 0);
-    setPreview(doc);
-    if (sessionId) setEditorDraft(sessionId, next);
-    if (onRun) onRun(doc);
+    if (onRunRef.current) onRunRef.current(doc);
   }
 
   function updateContent(val) {
-    setFiles(prev => prev.map((f, i) => i === activeIdx ? { ...f, content: val } : f));
+    setFiles(prev => {
+      const next = prev.map((f, i) => i === activeIdxRef.current ? { ...f, content: val } : f);
+      filesRef.current = next;
+      return next;
+    });
   }
 
   function addFile() {
     let name = newName.trim();
     if (!name) { setAdding(false); setNewName(''); return; }
     if (!/\.\w+$/.test(name)) name += '.html';
-    const exists = files.findIndex(f => f.name === name);
-    if (exists >= 0) { setActiveIdx(exists); }
-    else {
-      const next = [...files, { name, content: '' }];
+    const exists = filesRef.current.findIndex(f => f.name === name);
+    if (exists >= 0) {
+      setActiveIdx(exists);
+      activeIdxRef.current = exists;
+    } else {
+      const next = [...filesRef.current, { name, content: '' }];
+      filesRef.current = next;
       setFiles(next);
       setActiveIdx(next.length - 1);
+      activeIdxRef.current = next.length - 1;
     }
     setAdding(false); setNewName('');
   }
 
   function closeFile(idx, e) {
     e.stopPropagation();
-    if (files.length === 1) return;
-    const next = files.filter((_, i) => i !== idx);
+    if (filesRef.current.filter(f => !f.isAsset).length === 1) return;
+    const next = filesRef.current.filter((_, i) => i !== idx);
+    const newIdx = Math.min(activeIdxRef.current, next.length - 1);
+    filesRef.current = next;
+    activeIdxRef.current = newIdx;
     setFiles(next);
-    setActiveIdx(Math.min(activeIdx, next.length - 1));
+    setActiveIdx(newIdx);
   }
 
   function commitRename(idx, val) {
     const name = val.trim();
-    if (name && !files.some((f, i) => i !== idx && f.name === name)) {
-      setFiles(prev => prev.map((f, i) => i === idx ? { ...f, name } : f));
+    if (name && !filesRef.current.some((f, i) => i !== idx && f.name === name)) {
+      setFiles(prev => {
+        const next = prev.map((f, i) => i === idx ? { ...f, name } : f);
+        filesRef.current = next;
+        return next;
+      });
     }
     setRenameIdx(null);
   }
@@ -580,9 +653,6 @@ useEffect(() => {
     setTimeout(() => URL.revokeObjectURL(url), 10000);
   }
 
-  /* Vertical drag: resize editor vs preview height.
-     A fixed full-screen overlay is mounted while dragging so the iframe
-     cannot steal mouse events (which would make the drag appear to trigger on hover). */
   function onVDragStart(e) {
     e.preventDefault();
     setIsDragging('v');
@@ -602,7 +672,6 @@ useEffect(() => {
     document.addEventListener('mouseup', onUp);
   }
 
-  /* Horizontal drag: simulate different viewport widths for responsivity testing. */
   function onHDragStart(e) {
     e.preventDefault();
     setIsDragging('h');
@@ -627,15 +696,18 @@ useEffect(() => {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = ev => {
-      setFiles(prev => prev.map((f, i) =>
-        i === activeIdx ? { ...f, content: ev.target.result } : f
-      ));
+      setFiles(prev => {
+        const next = prev.map((f, i) =>
+          i === activeIdxRef.current ? { ...f, content: ev.target.result } : f
+        );
+        filesRef.current = next;
+        return next;
+      });
     };
     reader.readAsDataURL(file);
     e.target.value = '';
   }
 
-  // Restore cursor position after AC text insertion (runs after every render)
   useEffect(() => {
     if (pendingCursor.current !== null && textareaRef.current) {
       textareaRef.current.selectionStart = pendingCursor.current;
@@ -644,7 +716,6 @@ useEffect(() => {
     }
   });
 
-  // Apply an autocomplete suggestion: replace partial word and set cursor at $C marker
   function applyAC(sug) {
     const ta = textareaRef.current;
     if (!ta) return;
@@ -661,7 +732,6 @@ useEffect(() => {
     pendingCursor.current = before.length + (cursorOff >= 0 ? cursorOff : ins.length);
   }
 
-  // Textarea onChange: update file content + recompute autocomplete
   function handleEditorChange(e) {
     const val = e.target.value;
     updateContent(val);
@@ -672,7 +742,6 @@ useEffect(() => {
     if (list.length > 0) setAcPos(getCaretPos(e.target));
   }
 
-  // Textarea onKeyDown: AC navigation + existing shortcuts
   function handleEditorKeyDown(e) {
     if (acList.length > 0) {
       if (e.key === 'ArrowDown')  { e.preventDefault(); setAcIdx(i => (i + 1) % acList.length); return; }
@@ -681,7 +750,6 @@ useEffect(() => {
       if (e.key === 'Enter')      { e.preventDefault(); applyAC(acList[acIdx]); return; }
       if (e.key === 'Escape')     { setAcList([]); return; }
     }
-    // Tab with no AC → soft indent (2 spaces)
     if (e.key === 'Tab' && acList.length === 0) {
       e.preventDefault();
       const ta = e.target;
@@ -694,10 +762,13 @@ useEffect(() => {
     if (e.ctrlKey && e.key === 'Enter') { e.preventDefault(); run(); }
   }
 
-  const active       = files[activeIdx] ?? files[0];
-  const fileColor    = extColor(active?.name);
-  const activeIsImg  = isImage(active?.name);
-  const pageTitle    = extractTitle(preview);
+  const active      = files[activeIdx] ?? files[0];
+  const fileColor   = extColor(active?.name);
+  const activeIsImg = isImage(active?.name);
+  const pageTitle   = extractTitle(preview);
+
+  const editableTabs = files.filter(f => !f.isAsset);
+  const assetBadges  = files.filter(f =>  f.isAsset);
 
   return (
     <div ref={containerRef} style={{ flex:1, display:'flex', flexDirection:'column',
@@ -708,13 +779,14 @@ useEffect(() => {
         <div style={{ display:'flex', alignItems:'flex-end', overflowX:'auto',
           padding:'6px 8px 0', gap:2 }}>
 
-          {files.map((file, idx) => {
+          {editableTabs.map((file) => {
+            const realIdx = files.indexOf(file);
             const fc  = extColor(file.name);
-            const act = idx === activeIdx;
+            const act = realIdx === activeIdx;
             return (
-              <div key={idx}
-                onClick={() => { setActiveIdx(idx); setRenameIdx(null); }}
-                onDoubleClick={() => setRenameIdx(idx)}
+              <div key={realIdx}
+                onClick={() => { setActiveIdx(realIdx); activeIdxRef.current = realIdx; setRenameIdx(null); }}
+                onDoubleClick={() => setRenameIdx(realIdx)}
                 style={{ display:'flex', alignItems:'center', gap:5, padding:'5px 10px',
                   cursor:'pointer', borderRadius:'8px 8px 0 0', whiteSpace:'nowrap',
                   background: act ? `${fc}18` : 'transparent',
@@ -724,20 +796,20 @@ useEffect(() => {
                   fontSize:12, fontWeight:700, color: act ? fc : C.muted,
                 }}>
                 <span style={{ fontSize:13 }}>{extIcon(file.name)}</span>
-                {renameIdx === idx ? (
+                {renameIdx === realIdx ? (
                   <input autoFocus defaultValue={file.name}
                     style={{ border:'none', outline:'none', background:'transparent',
                       fontFamily:F.body, fontSize:12, fontWeight:700, color:fc,
                       width: Math.max(60, file.name.length * 8) }}
                     onClick={e => e.stopPropagation()}
-                    onBlur={e  => commitRename(idx, e.target.value)}
+                    onBlur={e  => commitRename(realIdx, e.target.value)}
                     onKeyDown={e => {
-                      if (e.key === 'Enter')  commitRename(idx, e.target.value);
+                      if (e.key === 'Enter')  commitRename(realIdx, e.target.value);
                       if (e.key === 'Escape') setRenameIdx(null);
                     }} />
                 ) : <span>{file.name}</span>}
-                {files.length > 1 && (
-                  <span onClick={e => closeFile(idx, e)}
+                {editableTabs.length > 1 && (
+                  <span onClick={e => closeFile(realIdx, e)}
                     style={{ fontSize:11, color:'#bbb', lineHeight:1,
                       padding:'0 2px', cursor:'pointer' }}>×</span>
                 )}
@@ -745,7 +817,6 @@ useEffect(() => {
             );
           })}
 
-          {/* + new file */}
           {adding ? (
             <div style={{ display:'flex', alignItems:'center', padding:'5px 8px',
               border:`2px dashed ${C.cyan}`, borderRadius:'8px 8px 0 0',
@@ -770,21 +841,31 @@ useEffect(() => {
                 fontFamily:F.body, fontWeight:700, alignSelf:'flex-end' }}>+</button>
           )}
 
+          {assetBadges.length > 0 && (
+            <div style={{ display:'flex', gap:4, alignItems:'center',
+              marginLeft:8, alignSelf:'center' }}>
+              {assetBadges.map((asset, i) => (
+                <span key={i} title={asset.content}
+                  style={{ background:'#FF61D218', border:'1.5px solid #FF61D244',
+                    borderRadius:8, padding:'3px 9px',
+                    fontSize:11, fontWeight:700, color:'#FF61D2',
+                    display:'flex', alignItems:'center', gap:4 }}>
+                  🖼️ {asset.name}
+                </span>
+              ))}
+            </div>
+          )}
+
           <div style={{ flex:1 }} />
           {saved && <span style={{ color:C.lime, fontSize:11, fontWeight:700,
             alignSelf:'center', marginRight:8 }}>✓ Saved</span>}
         </div>
 
-        {/* action row */}
         <div style={{ display:'flex', alignItems:'center', gap:8,
           padding:'4px 12px 6px', borderTop:'1px solid #E8F4FF' }}>
           <span style={{ color:'#B0C8E0', fontSize:11, fontWeight:600, flex:1 }}>
             Ctrl+Enter = Run &nbsp;·&nbsp; Tab = autocomplete &nbsp;·&nbsp; Double-click tab to rename
           </span>
-          <button onClick={reset}
-            style={{ background:'#F0F8FF', border:'2px solid #C8EEFF', borderRadius:10,
-              color:C.muted, cursor:'pointer', padding:'4px 12px',
-              fontFamily:F.body, fontSize:12, fontWeight:700 }}>↺ Reset</button>
           <button onClick={run}
             style={{ background:C.lime, border:'2px solid #5CB833', borderRadius:12,
               color:'#1A3020', cursor:'pointer', fontFamily:F.head,
@@ -800,10 +881,14 @@ useEffect(() => {
           color:fileColor, fontFamily:F.body, fontWeight:700, letterSpacing:.6,
           flexShrink:0, borderBottom:`1px solid ${fileColor}33` }}>
           {extIcon(active?.name)} EDITOR — {active?.name}
+          {active?.isAsset && (
+            <span style={{ marginLeft:10, color:'#FF61D2', fontSize:10 }}>
+              (read-only image asset)
+            </span>
+          )}
         </div>
 
         {activeIsImg ? (
-          /* Image file: upload area + preview */
           <div style={{ flex:1, background:'#0D1117', display:'flex', flexDirection:'column',
             alignItems:'center', justifyContent:'center', gap:16, padding:24, minHeight:0 }}>
             {active?.content
@@ -812,26 +897,31 @@ useEffect(() => {
                     border:'2px solid #30363D', objectFit:'contain' }} />
               : <div style={{ fontSize:64, opacity:.4 }}>🖼️</div>
             }
-            <label style={{
-              display:'inline-block',
-              background: active?.content ? '#21262D' : C.cyan,
-              border:`2px solid ${active?.content ? '#30363D' : '#5BB833'}`,
-              borderRadius:10, padding:'8px 22px', cursor:'pointer',
-              fontFamily:F.head, fontSize:14,
-              color: active?.content ? '#E6EDF3' : '#041A0E',
-            }}>
-              {active?.content ? '🔄 Replace Image' : '📁 Upload Image'}
-              <input type="file" accept="image/*" style={{ display:'none' }}
-                onChange={handleImageUpload} />
-            </label>
-            {active?.content && (
-              <span style={{ color:'#6B82A8', fontSize:11 }}>
-                {active.name} · reference this filename in your HTML src attribute
+            {!active?.isAsset && (
+              <label style={{
+                display:'inline-block',
+                background: active?.content ? '#21262D' : C.cyan,
+                border:`2px solid ${active?.content ? '#30363D' : '#5BB833'}`,
+                borderRadius:10, padding:'8px 22px', cursor:'pointer',
+                fontFamily:F.head, fontSize:14,
+                color: active?.content ? '#E6EDF3' : '#041A0E',
+              }}>
+                {active?.content ? '🔄 Replace Image' : '📁 Upload Image'}
+                <input type="file" accept="image/*" style={{ display:'none' }}
+                  onChange={handleImageUpload} />
+              </label>
+            )}
+            {active?.isAsset && (
+              <span style={{ color:'#6B82A8', fontSize:12, textAlign:'center' }}>
+                This image was uploaded by your teacher.<br/>
+                Use it in your HTML: <code style={{ color:'#FF61D2', background:'#ffffff14',
+                  padding:'1px 6px', borderRadius:4 }}>
+                  {'<img src="'}{active.name}{'" alt="">'}
+                </code>
               </span>
             )}
           </div>
         ) : (
-          /* Code editor: textarea + floating autocomplete dropdown */
           <div style={{ flex:1, position:'relative', minHeight:0 }}>
             <textarea
               ref={textareaRef}
@@ -841,44 +931,39 @@ useEffect(() => {
               onKeyDown={handleEditorKeyDown}
               onBlur={() => setTimeout(() => setAcList([]), 120)}
               spellCheck={false}
+              readOnly={active?.isAsset}
               style={{ width:'100%', height:'100%', background:'#0D1117', color:'#E6EDF3',
                 border:'none', padding:'14px 18px',
                 fontFamily:"'Courier New',Courier,monospace",
                 fontSize:13, lineHeight:1.8, outline:'none', resize:'none',
-                boxSizing:'border-box' }} />
+                boxSizing:'border-box',
+                opacity: active?.isAsset ? 0.5 : 1,
+                cursor:  active?.isAsset ? 'not-allowed' : 'text',
+              }} />
 
-            {/* ── Autocomplete dropdown ── */}
             {acList.length > 0 && (
-              <div
-                onMouseDown={e => e.preventDefault()}
+              <div onMouseDown={e => e.preventDefault()}
                 style={{ position:'fixed', top:acPos.top, left:acPos.left,
                   zIndex:10001, background:'#161B22',
                   border:'1.5px solid #388BFD', borderRadius:8,
                   boxShadow:'0 8px 32px rgba(0,0,0,0.7)',
                   minWidth:200, maxWidth:340, maxHeight:228, overflowY:'auto',
-                  fontFamily:"'Courier New',Courier,monospace",
-                }}>
-                {/* Header hint */}
+                  fontFamily:"'Courier New',Courier,monospace" }}>
                 <div style={{ padding:'3px 10px', fontSize:9, color:'#6A8A9A',
                   borderBottom:'1px solid #21262D', fontFamily:F.body, letterSpacing:.5 }}>
                   ↑↓ navigate &nbsp;·&nbsp; Tab / Enter = accept &nbsp;·&nbsp; Esc = dismiss
                 </div>
                 {acList.map((s, i) => (
-                  <div key={i}
-                    onClick={() => applyAC(s)}
-                    onMouseEnter={() => setAcIdx(i)}
+                  <div key={i} onClick={() => applyAC(s)} onMouseEnter={() => setAcIdx(i)}
                     style={{ display:'flex', alignItems:'center', gap:8, padding:'5px 10px',
                       background: i === acIdx ? '#1F4070' : 'transparent',
                       cursor:'pointer', fontSize:12,
                       color: i === acIdx ? '#E6EDF3' : '#B0C8D0',
-                      borderBottom:'1px solid rgba(255,255,255,0.04)',
-                    }}>
+                      borderBottom:'1px solid rgba(255,255,255,0.04)' }}>
                     <span style={{ fontSize:9, fontFamily:F.body, fontWeight:700,
-                      color: kindColor(s.kind),
-                      background:`${kindColor(s.kind)}22`,
+                      color: kindColor(s.kind), background:`${kindColor(s.kind)}22`,
                       borderRadius:3, padding:'1px 5px',
-                      minWidth:32, textAlign:'center', flexShrink:0,
-                    }}>{s.kind}</span>
+                      minWidth:32, textAlign:'center', flexShrink:0 }}>{s.kind}</span>
                     <span style={{ flex:1, overflow:'hidden', textOverflow:'ellipsis',
                       whiteSpace:'nowrap' }}>{s.label}</span>
                   </div>
@@ -889,22 +974,15 @@ useEffect(() => {
         )}
       </div>
 
-      {/* Full-screen drag overlay — covers iframes so they cannot steal mouse events
-          during an active drag. Mounted only while the user holds the mouse button. */}
       {isDragging && (
-        <div style={{
-          position: 'fixed', inset: 0, zIndex: 99999,
-          cursor: isDragging === 'v' ? 'ns-resize' : 'ew-resize',
-        }} />
+        <div style={{ position:'fixed', inset:0, zIndex:99999,
+          cursor: isDragging === 'v' ? 'ns-resize' : 'ew-resize' }} />
       )}
 
-      {/* ── Inline Preview (hidden when parent controls it) ── */}
+      {/* ── Inline Preview ── */}
       {!hidePreview && (
         <>
-          {/* Vertical drag handle — drag up to grow preview, down to shrink */}
-          <div
-            onMouseDown={onVDragStart}
-            title="Drag to resize preview height"
+          <div onMouseDown={onVDragStart} title="Drag to resize preview height"
             style={{ height:8, cursor:'ns-resize', flexShrink:0, userSelect:'none',
               background:`${C.cyan}18`, borderTop:`2px solid ${C.cyan}55`,
               display:'flex', alignItems:'center', justifyContent:'center' }}>
@@ -916,7 +994,6 @@ useEffect(() => {
               flexShrink:0, background:'#fff',
               ...(previewFs ? { position:'fixed', inset:0, zIndex:9999, height:'100vh' } : {}) }}>
 
-            {/* Preview toolbar */}
             <div style={{ background:`linear-gradient(90deg,${C.cyan}20,#EBF8FF)`,
               padding:'5px 10px', fontSize:11, color:C.cyan, fontFamily:F.body,
               fontWeight:700, letterSpacing:.5, flexShrink:0,
@@ -940,13 +1017,12 @@ useEffect(() => {
                     fontSize:9, color:'#B0C8E0', fontFamily:F.body }}>Full</button>
               </>}
               <span style={{ color:'#B0C8E0', fontSize:10, whiteSpace:'nowrap' }}>▶ Run to update</span>
-              <button onClick={openInNewTab} title="Open preview in new browser tab"
+              <button onClick={openInNewTab}
                 style={{ background:'transparent', border:`1.5px solid ${C.orange}`,
                   borderRadius:6, padding:'2px 7px', cursor:'pointer',
                   fontSize:10, color:C.orange, fontFamily:F.body, fontWeight:700,
                   whiteSpace:'nowrap' }}>↗ New Tab</button>
-              <button
-                onClick={() => {
+              <button onClick={() => {
                   if (document.fullscreenElement) document.exitFullscreen();
                   else previewWrap.current?.requestFullscreen?.();
                 }}
@@ -959,32 +1035,24 @@ useEffect(() => {
               </button>
             </div>
 
-            {/* Preview content area with horizontal viewport-width drag */}
             <div ref={previewArea}
               style={{ flex:1, display:'flex', overflow:'hidden', position:'relative' }}>
               <iframe srcDoc={preview}
                 style={{ height:'100%', border:'none',
-                  ...(previewW !== null
-                    ? { width:previewW, flex:'none' }
-                    : { flex:1 }) }}
+                  ...(previewW !== null ? { width:previewW, flex:'none' } : { flex:1 }) }}
                 sandbox="allow-scripts allow-forms allow-modals"
                 title="Preview" />
 
-              {/* Horizontal drag handle — always on the right edge of the iframe */}
-              <div
-                onMouseDown={onHDragStart}
+              <div onMouseDown={onHDragStart}
                 title="Drag left/right to simulate different screen widths"
                 style={{ width:8, flexShrink:0, cursor:'ew-resize', userSelect:'none',
                   background: previewW !== null ? `${C.cyan}44` : `${C.cyan}18`,
                   borderLeft:`2px solid ${C.cyan}44`,
                   display:'flex', alignItems:'center', justifyContent:'center',
-                  ...(previewW === null
-                    ? { position:'absolute', right:0, top:0, bottom:0 }
-                    : {}) }}>
+                  ...(previewW === null ? { position:'absolute', right:0, top:0, bottom:0 } : {}) }}>
                 <div style={{ width:3, height:32, borderRadius:2, background:`${C.cyan}99` }} />
               </div>
 
-              {/* Dead zone — hatched area representing outside the simulated viewport */}
               {previewW !== null && (
                 <div style={{ flex:1, minWidth:0,
                   backgroundImage:'repeating-linear-gradient(45deg,#e8eef4 0,#e8eef4 10px,#f0f4f8 10px,#f0f4f8 20px)',

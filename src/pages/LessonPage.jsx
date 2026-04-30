@@ -31,18 +31,21 @@ export default function LessonPage() {
   const freeLimit = currentCourse?.freeSessionCount ?? 4;
   const [doneError,    setDoneError]    = useState(null);
   const [nextSession,  setNextSession]  = useState(null);
-  const [canComplete,  setCanComplete]  = useState(true);   // false until 75% watched/read
+  const [canComplete,  setCanComplete]  = useState(true);
   const [earlyMsg,     setEarlyMsg]     = useState('');
-  const [earlyConfirm, setEarlyConfirm] = useState(false);  // true = show "Complete Anyway?" banner
+  const [earlyConfirm, setEarlyConfirm] = useState(false);
   const earlyMsgTimer = useRef(null);
 
-  // ── Platform intro (shown once before session 1) ─────────────────────
   const [showIntro,   setShowIntro]   = useState(false);
   const [missionOpen, setMissionOpen] = useState(false);
 
-  // ── Split preview (right-column full-height when video + IDE) ────────
-  const [splitPreview,    setSplitPreview]    = useState('');          // FIX 1: start empty
-  const [splitFrac,       setSplitFrac]       = useState(50); // % width of left column
+  // FIX: start as null, not ''.
+  // CodeEditor calls onRun(buildDoc(...)) on mount with the fully-assembled doc
+  // (CSS + JS merged in). The old seeding effect set this to raw session.starterCode
+  // (no CSS/JS), which raced with onRun and produced a blank/unstyled preview.
+  // Initialising to null means the iframe doesn't render until CodeEditor fires onRun.
+  const [splitPreview,    setSplitPreview]    = useState(null);
+  const [splitFrac,       setSplitFrac]       = useState(50);
   const [isSplitDragging, setIsSplitDragging] = useState(false);
   const splitContainerRef = useRef(null);
 
@@ -84,10 +87,8 @@ export default function LessonPage() {
     setShowIntro(false);
   }
 
-  // Remember last visited lesson (in effect, not render body)
   useEffect(() => { if (id) setLastLesson(id); }, [id]);
 
-  // Gate the Done button for video and document sessions
   useEffect(() => {
     if (!session) return;
     const needsGate = Boolean(session.videoUrl) ||
@@ -97,14 +98,18 @@ export default function LessonPage() {
     setEarlyConfirm(false);
   }, [session?.id]);
 
-  // FIX 2: seed splitPreview from session.starterCode when session loads
-  useEffect(() => {
-    if (session?.starterCode && !splitPreview) {
-      setSplitPreview(session.starterCode);
-    }
-  }, [session?.id]); // eslint-disable-line
+  // FIX: removed the broken seeding effect that used to live here:
+  //
+  //   useEffect(() => {
+  //     if (session?.starterCode && !splitPreview) {
+  //       setSplitPreview(session.starterCode);   // ← raw HTML only, no CSS/JS assembled
+  //     }
+  //   }, [session?.id]);
+  //
+  // It was setting splitPreview to the raw starterCode string before CodeEditor had a
+  // chance to call onRun(buildDoc(...)), meaning CSS and JS from separate files were
+  // never merged in and the preview appeared blank or unstyled.
 
-  // Redirect quiz sessions to the dedicated quiz page
   useEffect(() => {
     if (session?.type === 'QUIZ') nav(`/quiz/${id}`, { replace: true });
   }, [session?.type]);
@@ -115,7 +120,6 @@ export default function LessonPage() {
       const result = await completeSession(id, 3);
       markSessionDone(id);
 
-      // Find next session — used by the reward popup buttons
       const course = courses.find(c => c.sessions?.some(s => s.id === id));
       let next = null;
       if (course) {
@@ -125,7 +129,6 @@ export default function LessonPage() {
       }
       setNextSession(next);
 
-      // If already done before — no popup, just move on
       if (result.alreadyDone) {
         const courseId = course?.id;
         if (next && (isPremium || next.order <= freeLimit)) {
@@ -134,7 +137,6 @@ export default function LessonPage() {
           nav(courseId ? `/course/${courseId}` : '/courses');
         }
       }
-      // Otherwise the reward popup (reward && !reward.alreadyDone) takes over
     } catch (err) {
       const msg = err.code === 'ECONNABORTED' || err.message?.includes('timeout')
         ? '⏱ Server took too long — is the backend running?'
@@ -147,13 +149,11 @@ export default function LessonPage() {
     if (!canComplete) {
       const isDoc = session?.type === 'DOCUMENT';
       if (isDoc) {
-        // For documents: show tip and proceed immediately (light gate)
         setEarlyMsg('📖 Tip: scroll through the content for the full lesson!');
         clearTimeout(earlyMsgTimer.current);
         earlyMsgTimer.current = setTimeout(() => setEarlyMsg(''), 4000);
         handleMarkDone();
       } else {
-        // For video: require explicit confirmation before marking done
         setEarlyConfirm(true);
       }
       return;
@@ -161,7 +161,6 @@ export default function LessonPage() {
     handleMarkDone();
   }
 
-  // Called by VideoPlayer whenever student pauses or leaves
   const handleVideoProgress = useCallback((exitSeconds, duration, maxSeconds) => {
     if (!session?.id || !currentCourse?.id) return;
     api.patch('/progress/video-watch', {
@@ -170,7 +169,7 @@ export default function LessonPage() {
       exitSeconds,
       maxSeconds,
       duration,
-    }).catch(() => {}); // silent — analytics only
+    }).catch(() => {});
   }, [session?.id, currentCourse?.id]); // eslint-disable-line
 
   function goNext() {
@@ -178,7 +177,6 @@ export default function LessonPage() {
     const ns = nextSession;
     setNextSession(null);
     if (!ns) {
-      // Last session — go back to the course roadmap
       nav(currentCourse?.id ? `/course/${currentCourse.id}` : '/courses');
       return;
     }
@@ -186,9 +184,7 @@ export default function LessonPage() {
     nav(ns.type === 'QUIZ' ? `/quiz/${ns.id}` : `/lesson/${ns.id}`);
   }
 
-  function handleUpgrade() {
-    nav('/pricing');
-  }
+  function handleUpgrade() { nav('/pricing'); }
 
   if (loading) return <LoadingScreen />;
 
@@ -203,20 +199,7 @@ export default function LessonPage() {
           <>
             <div style={{ fontSize:80 }}>👑</div>
             <div style={{ fontFamily:"'Fredoka One',cursive", fontSize:30, color:'#FFD700',
-              textAlign:'center', maxWidth:380 }}>
-              This lesson is Premium only
-            </div>
-            <div style={{ color:'rgba(232,255,245,.7)', fontSize:15, textAlign:'center', maxWidth:340, fontWeight:600 }}>
-              Unlock all sessions, live IDE, quizzes and more for just ₹1,499 / month
-            </div>
-            <div style={{ display:'flex', gap:12, flexWrap:'wrap', justifyContent:'center', marginTop:8 }}>
-              {['All sessions unlocked','Live code IDE','Quizzes & boss levels','Certificates'].map(f => (
-                <span key={f} style={{ background:'rgba(255,215,0,.12)', border:'1px solid rgba(255,215,0,.4)',
-                  borderRadius:50, padding:'4px 14px', color:'#FFD700', fontSize:13, fontWeight:700 }}>
-                  ✓ {f}
-                </span>
-              ))}
-            </div>
+              textAlign:'center', maxWidth:380 }}>This lesson is Premium only</div>
             <button onClick={handleUpgrade}
               style={{ background:'linear-gradient(135deg,#FFD700,#E8A800)',
                 border:'3px solid #FFD700', borderRadius:16, color:'#1A0E00',
@@ -224,9 +207,7 @@ export default function LessonPage() {
                 cursor:'pointer', boxShadow:'0 6px 0 #A07800', marginTop:8 }}>
               👑 Upgrade to Premium →
             </button>
-            <Btn onClick={() => nav(-1)} color={C.cyan} textColor='#041A0E' sm>
-              ← Go Back
-            </Btn>
+            <Btn onClick={() => nav(-1)} color={C.cyan} textColor='#041A0E' sm>← Go Back</Btn>
           </>
         ) : (
           <>
@@ -240,8 +221,49 @@ export default function LessonPage() {
     );
   }
 
+  // Don't render editor until session data matches the URL id.
+  // Without this, CodeEditor mounts with the previous session's starterFiles
+  // for a brief moment when navigating manually, loading the wrong starter code.
+  const sessionReady = session && (session.id === id || session._id === id);
+
   const hasVideo = Boolean(session?.videoUrl) || session?.type === 'VIDEO' || session?.type === 'BOSS';
   const hasIDE   = Boolean(session?.hasIde)   || session?.type === 'CODE'  || session?.type === 'BOSS';
+
+  // ── Build starterFiles array from the session's separate fields ──
+  // This merges starterCode/starterCss/starterJs + imageAssets into the
+  // multi-file format CodeEditor already understands.
+  function buildStarterFiles(s) {
+    if (!s) return null;
+
+    const base = [];
+
+    const html = s.starterCode?.trim();
+    const css  = s.starterCss?.trim();
+    const js   = s.starterJs?.trim();
+
+    if (html) base.push({ name: 'index.html', content: html });
+    if (css)  base.push({ name: 'style.css',  content: css  });
+    if (js)   base.push({ name: 'script.js',  content: js   });
+
+    // Add image assets — content is the CDN URL, buildDoc will
+    // replace src="filename" with the real URL in the preview
+    const imgs = (s.imageAssets || []).map(img => ({
+      name:    img.name,   // e.g. "cat.png"
+      content: img.url,    // CDN URL — treated as src replacement
+      isAsset: true,       // flag so CodeEditor shows it read-only
+    }));
+
+    const all = [...base, ...imgs];
+
+    // Fall back to legacy starterFiles if we have nothing from new fields
+    if (all.length === 0 && Array.isArray(s.starterFiles) && s.starterFiles.length) {
+      return s.starterFiles;
+    }
+
+    return all.length ? all : null;
+  }
+
+  const starterFiles = buildStarterFiles(session);
 
   return (
     <div
@@ -256,7 +278,6 @@ export default function LessonPage() {
           background:'rgba(4,26,14,.85)', backdropFilter:'blur(8px)',
           display:'flex', alignItems:'center', justifyContent:'center', zIndex:200, padding:20 }}>
 
-          {/* Confetti */}
           {[...Array(28)].map((_,i) => (
             <div key={i} style={{
               position:'fixed',
@@ -282,20 +303,19 @@ export default function LessonPage() {
           `}</style>
 
           <div style={{ background:'rgba(13,59,34,.95)', backdropFilter:'blur(16px)',
-            borderRadius:32, border:`4px solid ${reward.leveledUp ? C.gold : C.lime}`,
-            boxShadow:`0 0 100px ${reward.leveledUp ? C.gold : C.lime}55, 0 12px 0 ${reward.leveledUp ? C.gold : C.lime}66`,
+            borderRadius:32, border:`4px solid ${reward.leveledUp ? '#FFD700' : C.lime}`,
+            boxShadow:`0 0 100px ${reward.leveledUp ? '#FFD700' : C.lime}55, 0 12px 0 ${reward.leveledUp ? '#FFD700' : C.lime}66`,
             padding:'44px 36px', textAlign:'center', maxWidth:440,
             animation:'pop .5s cubic-bezier(.4,2,.4,1)', position:'relative', zIndex:202 }}>
 
             <div style={{ fontSize:96, lineHeight:1,
-              animation:'medal-bounce .7s cubic-bezier(.4,2,.4,1) both',
-              filter:`drop-shadow(0 0 28px ${reward.leveledUp ? C.gold : C.lime}BB)` }}>
+              animation:'medal-bounce .7s cubic-bezier(.4,2,.4,1) both' }}>
               {reward.leveledUp ? '🎊' : '🎉'}
             </div>
 
             <div style={{ fontFamily:"'Fredoka One',cursive", fontSize:34, margin:'14px 0 6px',
               background: reward.leveledUp
-                ? `linear-gradient(135deg,${C.gold},#fff,${C.gold})`
+                ? `linear-gradient(135deg,#FFD700,#fff,#FFD700)`
                 : `linear-gradient(135deg,${C.lime},${C.teal})`,
               WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent' }}>
               {reward.leveledUp ? `LEVEL UP! Now Lv.${reward.newLevel} 🚀` : 'Session Complete! ⭐'}
@@ -322,12 +342,10 @@ export default function LessonPage() {
 
             {reward.newBadges?.length > 0 && reward.newBadges.map(b => (
               <div key={b.id} style={{
-                background:'rgba(255,215,0,.12)', border:`2px solid ${C.yellow}`,
-                borderRadius:14, padding:'10px 18px', margin:'8px 0',
-                animation:'pop .5s cubic-bezier(.4,2,.4,1)',
-              }}>
+                background:'rgba(255,215,0,.12)', border:`2px solid #FFD700`,
+                borderRadius:14, padding:'10px 18px', margin:'8px 0' }}>
                 <div style={{ fontSize:40 }}>{b.emoji}</div>
-                <div style={{ fontFamily:"'Fredoka One',cursive", color:C.yellow, fontSize:18 }}>
+                <div style={{ fontFamily:"'Fredoka One',cursive", color:'#FFD700', fontSize:18 }}>
                   🏅 New Badge: {b.name}!
                 </div>
               </div>
@@ -397,23 +415,16 @@ export default function LessonPage() {
             fontFamily:"'Fredoka One',cursive", color:'#B8960A', fontSize:14 }}>
             🪙 {session?.coinsReward}
           </span>
-          <Btn
-            onClick={handleMarkDoneGuarded}
-            disabled={completing}
-            color={C.lime}
-            textColor='#1A3020'
-            sm
-            style={{ fontWeight:700 }}
-          >
+          <Btn onClick={handleMarkDoneGuarded} disabled={completing}
+            color={C.lime} textColor='#1A3020' sm style={{ fontWeight:700 }}>
             {completing ? '⏳' : '✓ Done'}
           </Btn>
         </div>
+
         {earlyMsg && (
           <div style={{ width:'100%', background:'rgba(255,215,0,.12)', border:'2px solid rgba(255,215,0,.5)',
             borderRadius:10, padding:'6px 14px', color:'#B8960A', fontSize:12, fontWeight:700,
-            marginTop:6, flexShrink:0 }}>
-            {earlyMsg}
-          </div>
+            marginTop:6, flexShrink:0 }}>{earlyMsg}</div>
         )}
         {earlyConfirm && (
           <div style={{ width:'100%', background:'rgba(255,107,53,.1)', border:'2px solid rgba(255,107,53,.5)',
@@ -422,57 +433,45 @@ export default function LessonPage() {
             <span style={{ flex:1, color:'#C84A1A', fontSize:12, fontWeight:700 }}>
               🎬 You haven't finished the video yet. You can still complete it — but your progress won't be fully counted.
             </span>
-            <button
-              onClick={() => { setEarlyConfirm(false); handleMarkDone(); }}
+            <button onClick={() => { setEarlyConfirm(false); handleMarkDone(); }}
               style={{ background:'linear-gradient(180deg,#FF6B35,#E8501A)', border:'none',
                 borderRadius:10, padding:'7px 18px', cursor:'pointer',
                 fontFamily:"'Fredoka One',cursive", fontSize:13, color:'#fff',
                 boxShadow:'0 3px 0 #C04A1A', flexShrink:0 }}>
               Complete Anyway ✓
             </button>
-            <button
-              onClick={() => setEarlyConfirm(false)}
+            <button onClick={() => setEarlyConfirm(false)}
               style={{ background:'rgba(255,255,255,.1)', border:'1.5px solid rgba(255,255,255,.2)',
                 borderRadius:10, padding:'7px 14px', cursor:'pointer',
                 fontFamily:"'Fredoka One',cursive", fontSize:13, color:'rgba(232,255,245,.6)',
-                flexShrink:0 }}>
-              Keep Watching
-            </button>
+                flexShrink:0 }}>Keep Watching</button>
           </div>
         )}
         {doneError && (
           <div style={{ width:'100%', background:`${C.red}18`, border:`2px solid ${C.red}55`,
             borderRadius:10, padding:'6px 14px', color:C.red, fontSize:12, fontWeight:700,
-            marginTop:6, flexShrink:0 }}>
-            {doneError}
-          </div>
+            marginTop:6, flexShrink:0 }}>{doneError}</div>
         )}
       </div>
 
       {/* ── Main content ── */}
       <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden', minHeight:0 }}>
 
-        {/* DOCUMENT */}
         {session?.type === 'DOCUMENT' && (
           <div style={{ flex:1, display:'flex', overflow:'hidden', minHeight:0 }}>
             <DocumentViewer title={session.title} content={session.docContent} onCanComplete={() => setCanComplete(true)} />
           </div>
         )}
 
-        {/* Full-screen overlay while split-column is being dragged — prevents iframes stealing events */}
         {isSplitDragging && (
           <div style={{ position:'fixed', inset:0, zIndex:99999, cursor:'ew-resize' }} />
         )}
 
-        {/* VIDEO + IDE — left col (video top + editor bottom) · right col (preview full height) */}
+        {/* VIDEO + IDE */}
         {hasVideo && hasIDE && (
           <div ref={splitContainerRef} style={{ flex:1, display:'flex', overflow:'hidden', minHeight:0 }}>
-
-            {/* LEFT column: video on top, editor on bottom */}
             <div style={{ flex:`0 0 ${splitFrac}%`, display:'flex', flexDirection:'column',
               overflow:'hidden', minWidth:0 }}>
-
-              {/* Video — top ~42% — only mount after intro is dismissed */}
               <div style={{ flex:'0 0 42%', overflow:'hidden', minHeight:0,
                 borderBottom:`3px solid #C8EEFF` }}>
                 {!showIntro && (
@@ -485,14 +484,13 @@ export default function LessonPage() {
                   />
                 )}
               </div>
-
-              {/* Editor — bottom 58% (no inline preview) */}
               <div style={{ flex:1, overflow:'hidden', minHeight:0, display:'flex', flexDirection:'column' }}>
-                {session && (
+                {sessionReady && (
                   <CodeEditor
-                    starterCode={session?.starterCode || defaultStarterCode}
-                    starterFiles={session?.starterFiles || null}
-                    sessionId={id}
+                    key={session.id}
+                    starterCode={starterFiles?.filter(f => !f.isAsset).length > 1 ? undefined : (session.starterCode || defaultStarterCode)}
+                    starterFiles={starterFiles}
+                    sessionId={session.id}
                     inheritFromSessionId={prevSessionId}
                     hidePreview
                     onRun={setSplitPreview}
@@ -501,10 +499,7 @@ export default function LessonPage() {
               </div>
             </div>
 
-            {/* Column resize drag handle */}
-            <div
-              onMouseDown={onSplitDragStart}
-              title="Drag to resize panels"
+            <div onMouseDown={onSplitDragStart} title="Drag to resize panels"
               style={{ width:8, flexShrink:0, cursor:'ew-resize', userSelect:'none',
                 background:`${C.cyan}22`,
                 borderLeft:`2px solid ${C.cyan}55`, borderRight:`2px solid ${C.cyan}55`,
@@ -512,7 +507,6 @@ export default function LessonPage() {
               <div style={{ width:3, height:48, borderRadius:2, background:`${C.cyan}88` }} />
             </div>
 
-            {/* RIGHT column: live preview full height */}
             <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden', minWidth:0 }}>
               <div style={{ background:`linear-gradient(90deg,${C.cyan}20,#EBF8FF)`,
                 padding:'5px 12px', fontSize:11, color:C.cyan,
@@ -527,24 +521,36 @@ export default function LessonPage() {
                     </span>
                   : <span style={{ flex:1, color:'#B0C8E0', fontSize:10 }}>▶ Run to update</span>
                 }
-                <button onClick={openSplitInNewTab} title="Open preview in new browser tab"
+                <button onClick={openSplitInNewTab}
                   style={{ background:'transparent', border:`1.5px solid ${C.orange}`,
                     borderRadius:6, padding:'2px 8px', cursor:'pointer',
                     fontSize:10, color:C.orange, fontFamily:"'Quicksand',sans-serif",
                     fontWeight:700, whiteSpace:'nowrap', flexShrink:0 }}>↗ New Tab</button>
               </div>
-              <iframe
-                srcDoc={splitPreview}
-                style={{ flex:1, border:'none', width:'100%' }}
-                sandbox="allow-scripts allow-forms allow-modals"
-                title="Preview"
-                onContextMenu={e => e.preventDefault()}
-              />
+
+              {/* FIX: only render the iframe once CodeEditor has fired onRun with a real
+                  buildDoc result (splitPreview !== null). Previously the iframe rendered
+                  immediately with srcDoc="" which showed a blank white box, and the
+                  broken seeding effect could overwrite it with unstyled raw HTML. */}
+              {splitPreview
+                ? <iframe srcDoc={splitPreview}
+                    style={{ flex:1, border:'none', width:'100%' }}
+                    sandbox="allow-scripts allow-forms allow-modals"
+                    title="Preview"
+                    onContextMenu={e => e.preventDefault()} />
+                : <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center',
+                    flexDirection:'column', gap:10, color:'#B0C8E0',
+                    fontFamily:"'Fredoka One',cursive", fontSize:14,
+                    background:'#F6FEFF' }}>
+                    <span style={{ fontSize:40, opacity:.5 }}>▶</span>
+                    <span>Click Run to see your preview</span>
+                  </div>
+              }
             </div>
           </div>
         )}
 
-        {/* VIDEO only (no IDE) — only mount after intro is dismissed */}
+        {/* VIDEO only */}
         {hasVideo && !hasIDE && (
           <div style={{ flex:1, display:'flex', overflow:'hidden', minHeight:0 }}>
             {!showIntro && (
@@ -559,21 +565,21 @@ export default function LessonPage() {
           </div>
         )}
 
-        {/* CODE only (no video) */}
+        {/* CODE only */}
         {session?.type === 'CODE' && !hasVideo && (
           <div style={{ flex:1, display:'flex', overflow:'hidden', minHeight:0 }}>
-            {session && (
+            {sessionReady && (
               <CodeEditor
-                starterCode={session?.starterCode || defaultStarterCode}
-                starterFiles={session?.starterFiles || null}
-                sessionId={id}
+                key={session.id}
+                starterCode={session.starterCode || defaultStarterCode}
+                starterFiles={starterFiles}
+                sessionId={session.id}
                 inheritFromSessionId={prevSessionId}
               />
             )}
           </div>
         )}
 
-        {/* Fallback for any unhandled type */}
         {session && !hasVideo && session.type !== 'DOCUMENT' && session.type !== 'CODE' && session.type !== 'QUIZ' && (
           <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center',
             flexDirection:'column', gap:16, color:'#6B82A8', fontFamily:"'Fredoka One',cursive" }}>
@@ -585,43 +591,29 @@ export default function LessonPage() {
 
       {/* ── Floating Missions button ── */}
       {session?.missionText && (
-        <button
-          onClick={() => setMissionOpen(true)}
-          style={{
-            position:'fixed', bottom:24, right:24, zIndex:80,
+        <button onClick={() => setMissionOpen(true)}
+          style={{ position:'fixed', bottom:24, right:24, zIndex:80,
             background:`linear-gradient(135deg,${C.lime},#5BB832)`,
-            border:'none', borderRadius:50,
-            padding:'11px 20px', cursor:'pointer',
+            border:'none', borderRadius:50, padding:'11px 20px', cursor:'pointer',
             fontFamily:"'Fredoka One',cursive", fontSize:15,
             color:'#1A3020', boxShadow:`0 4px 0 #3A8A1A, 0 0 20px ${C.lime}55`,
-            display:'flex', alignItems:'center', gap:8,
-            transition:'transform .12s',
-          }}
+            display:'flex', alignItems:'center', gap:8, transition:'transform .12s' }}
           onMouseEnter={e => e.currentTarget.style.transform='translateY(-2px)'}
-          onMouseLeave={e => e.currentTarget.style.transform='translateY(0)'}
-        >
+          onMouseLeave={e => e.currentTarget.style.transform='translateY(0)'}>
           📋 Missions
         </button>
       )}
 
       {/* ── Missions popup ── */}
       {missionOpen && (
-        <div
-          onClick={() => setMissionOpen(false)}
+        <div onClick={() => setMissionOpen(false)}
           style={{ position:'fixed', inset:0, background:'rgba(4,26,14,.75)',
             backdropFilter:'blur(6px)', zIndex:150,
-            display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}
-        >
-          <div
-            onClick={e => e.stopPropagation()}
-            style={{
-              background:'#0D2B1A', border:`3px solid ${C.lime}`,
-              borderRadius:24, padding:'28px 28px 24px',
-              maxWidth:460, width:'100%',
-              boxShadow:`0 0 60px ${C.lime}33`,
-              fontFamily:"'Quicksand',sans-serif",
-            }}
-          >
+            display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ background:'#0D2B1A', border:`3px solid ${C.lime}`,
+              borderRadius:24, padding:'28px 28px 24px', maxWidth:460, width:'100%',
+              boxShadow:`0 0 60px ${C.lime}33`, fontFamily:"'Quicksand',sans-serif" }}>
             <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:16 }}>
               <div style={{ fontFamily:"'Fredoka One',cursive", fontSize:22, color:C.lime }}>
                 📋 Your Mission
@@ -629,16 +621,12 @@ export default function LessonPage() {
               <button onClick={() => setMissionOpen(false)}
                 style={{ background:'rgba(255,255,255,.1)', border:'none', borderRadius:8,
                   color:'rgba(232,255,245,.7)', fontSize:18, cursor:'pointer',
-                  width:32, height:32, display:'flex', alignItems:'center', justifyContent:'center' }}>
-                ✕
-              </button>
+                  width:32, height:32, display:'flex', alignItems:'center', justifyContent:'center' }}>✕</button>
             </div>
-            <div style={{
-              background:'linear-gradient(135deg,#0A3D1F,#0D2B1A)',
+            <div style={{ background:'linear-gradient(135deg,#0A3D1F,#0D2B1A)',
               border:`2px solid ${C.lime}44`, borderRadius:16,
               padding:18, fontSize:14, color:'#E8FFF5',
-              lineHeight:1.8, whiteSpace:'pre-line', fontWeight:600,
-            }}>
+              lineHeight:1.8, whiteSpace:'pre-line', fontWeight:600 }}>
               {session.missionText}
             </div>
             {session.docContent && (
@@ -649,20 +637,17 @@ export default function LessonPage() {
               </div>
             )}
             <button onClick={() => setMissionOpen(false)}
-              style={{
-                marginTop:18, width:'100%', padding:'12px',
+              style={{ marginTop:18, width:'100%', padding:'12px',
                 background:`linear-gradient(180deg,${C.lime},#5BB832)`,
                 border:'none', borderRadius:14,
                 fontFamily:"'Fredoka One',cursive", fontSize:16,
-                color:'#1A3020', cursor:'pointer', boxShadow:`0 4px 0 #3A8A1A`,
-              }}>
+                color:'#1A3020', cursor:'pointer', boxShadow:`0 4px 0 #3A8A1A` }}>
               Got it! Let's code 💻
             </button>
           </div>
         </div>
       )}
 
-      {/* ── Platform intro overlay (session 1, first visit) ── */}
       {showIntro && (
         <PlatformIntro avatar={user?.avatarEmoji} onDone={handleIntroDone} />
       )}
