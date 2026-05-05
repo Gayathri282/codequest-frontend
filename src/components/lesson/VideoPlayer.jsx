@@ -36,6 +36,31 @@ function loadYTApi(cb) {
   }
 }
 
+/* ─── Global key-blocker (devtools shortcuts) ────────── */
+// Blocks F12, Ctrl+U, Ctrl+S, Ctrl+Shift+I/J/C, Ctrl+P
+function useBlockDevtoolsKeys(active) {
+  useEffect(() => {
+    if (!active) return;
+    function onKey(e) {
+      const ctrl  = e.ctrlKey || e.metaKey;
+      const shift = e.shiftKey;
+      const k     = e.key;
+      if (
+        k === 'F12' ||
+        (ctrl && k === 'u') ||
+        (ctrl && k === 's') ||
+        (ctrl && k === 'p') ||
+        (ctrl && shift && ['i','I','j','J','c','C'].includes(k))
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    }
+    document.addEventListener('keydown', onKey, { capture: true });
+    return () => document.removeEventListener('keydown', onKey, { capture: true });
+  }, [active]);
+}
+
 /* ─── root component ──────────────────────────────────── */
 export default function VideoPlayer({ videoUrl, missionText, docContent, fullView = false, onCanComplete, onProgress }) {
   return isYouTube(videoUrl)
@@ -51,7 +76,7 @@ function YTPlayer({ url, missionText, docContent, fullView, onCanComplete, onPro
   const firedRef       = useRef(false);
   const onCompleteRef  = useRef(onCanComplete);
   const onProgressRef  = useRef(onProgress);
-  const maxSecondsRef  = useRef(0);  // highest position ever reached (never decreases)
+  const maxSecondsRef  = useRef(0);
 
   const [ready,    setReady]    = useState(false);
   const [playing,  setPlaying]  = useState(false);
@@ -61,6 +86,8 @@ function YTPlayer({ url, missionText, docContent, fullView, onCanComplete, onPro
   const [watchPct, setWatchPct] = useState(0);
 
   const videoId = extractYTId(url);
+
+  useBlockDevtoolsKeys(true);
 
   useEffect(() => { onCompleteRef.current = onCanComplete; }, [onCanComplete]);
   useEffect(() => { onProgressRef.current = onProgress; }, [onProgress]);
@@ -75,7 +102,6 @@ function YTPlayer({ url, missionText, docContent, fullView, onCanComplete, onPro
     } catch (_) {}
   }
 
-  // Build / rebuild player when videoId changes
   useEffect(() => {
     if (!videoId) return;
     firedRef.current = false;
@@ -117,7 +143,6 @@ function YTPlayer({ url, missionText, docContent, fullView, onCanComplete, onPro
                   firedRef.current = true;
                   onCompleteRef.current?.();
                 }
-                // Report progress on pause or end so admin sees last exit point
                 if (isPaused || isEnded) reportProgress();
               }
             } catch (_) {}
@@ -130,14 +155,13 @@ function YTPlayer({ url, missionText, docContent, fullView, onCanComplete, onPro
     loadYTApi(init);
 
     return () => {
-      reportProgress(); // report where student was when they left
+      reportProgress();
       try { playerRef.current?.destroy(); } catch (_) {}
       playerRef.current = null;
       if (containerRef.current) containerRef.current.innerHTML = '';
     };
   }, [videoId]); // eslint-disable-line
 
-  // Poll seek-bar position every 500 ms
   useEffect(() => {
     if (!ready) return;
     function checkProgress() {
@@ -191,10 +215,11 @@ function YTPlayer({ url, missionText, docContent, fullView, onCanComplete, onPro
     <div style={{ display:'flex', flexDirection:'column', flex:1, minHeight:0 }}>
       <div
         ref={wrapperRef}
-        onContextMenu={e => e.preventDefault()}
+        /* Block every right-click on the entire player wrapper */
+        onContextMenu={e => { e.preventDefault(); e.stopPropagation(); return false; }}
         style={{
           background:'#000', display:'flex', flexDirection:'column',
-          userSelect:'none',
+          userSelect:'none', WebkitUserSelect:'none',
           ...(fsOn
             ? { position:'fixed', inset:0, zIndex:9999 }
             : fullView
@@ -204,14 +229,30 @@ function YTPlayer({ url, missionText, docContent, fullView, onCanComplete, onPro
       >
         <div style={{ flex:1, position:'relative', minHeight:0 }}>
           <div ref={containerRef} style={{ width:'100%', height:'100%' }} />
-          {/* Right-click blocker — pointerEvents:auto blocks context menu on the video area.
-              All playback controls are external (YT API buttons), so blocking clicks here is safe. */}
+
+          {/*
+            Protection overlay — sits on top of the video iframe at z-index 10.
+            - pointerEvents:'auto'  → captures all mouse events so browser
+              "Save video as…" / "Copy video URL" context menu never appears.
+            - onContextMenu         → explicitly cancels the event.
+            - The overlay is transparent so the video is still visible.
+            NOTE: This intentionally blocks right-click on the video area.
+            All playback controls are provided via the YT API bar below.
+          */}
           <div
-            style={{ position:'absolute', inset:0, zIndex:2, pointerEvents:'auto', cursor:'default' }}
-            onContextMenu={e => e.preventDefault()}
+            style={{
+              position:'absolute', inset:0, zIndex:10,
+              pointerEvents:'auto',
+              cursor:'default',
+              WebkitTouchCallout:'none',
+              userSelect:'none',
+            }}
+            onContextMenu={e => { e.preventDefault(); e.stopPropagation(); return false; }}
+            onDragStart={e => e.preventDefault()}
           />
+
           {!ready && (
-            <div style={{ position:'absolute', inset:0, zIndex:3, pointerEvents:'none',
+            <div style={{ position:'absolute', inset:0, zIndex:11, pointerEvents:'none',
               display:'flex', alignItems:'center', justifyContent:'center' }}>
               <span style={{ background:'rgba(0,0,0,.6)', color:'#aaa', borderRadius:8,
                 padding:'6px 16px', fontSize:12, fontFamily:"'Quicksand',sans-serif", fontWeight:700 }}>
@@ -223,7 +264,7 @@ function YTPlayer({ url, missionText, docContent, fullView, onCanComplete, onPro
 
         {/* Controls */}
         <div style={{ background:'#0D1117', padding:'7px 12px', display:'flex',
-          alignItems:'center', gap:6, flexShrink:0, flexWrap:'wrap', zIndex:3 }}>
+          alignItems:'center', gap:6, flexShrink:0, flexWrap:'wrap', zIndex:12 }}>
           <button onClick={togglePlay} disabled={!ready} style={btn(ready ? C.lime : '#333','#1A3020',!ready)}>
             {playing ? '⏸ Pause' : '▶ Play'}
           </button>
@@ -239,7 +280,6 @@ function YTPlayer({ url, missionText, docContent, fullView, onCanComplete, onPro
             CC {ccOn ? 'ON' : 'OFF'}
           </button>
           <div style={{ flex:1 }} />
-          {/* Progress badge */}
           {ready && (
             <div style={{
               display:'flex', alignItems:'center', gap:5,
@@ -267,7 +307,7 @@ function YTPlayer({ url, missionText, docContent, fullView, onCanComplete, onPro
   );
 }
 
-/* ─── Generic iframe player (Bunny, Vimeo, etc.) ─────── */
+/* ─── Generic iframe player (Cloudinary, Bunny, Vimeo, etc.) ─── */
 function EmbedPlayer({ url, missionText, docContent, fullView, onCanComplete, onProgress }) {
   const wrapperRef    = useRef(null);
   const iframeRef     = useRef(null);
@@ -278,14 +318,15 @@ function EmbedPlayer({ url, missionText, docContent, fullView, onCanComplete, on
   const maxSecondsRef = useRef(0);
   const lastCurRef    = useRef(0);
   const lastDurRef    = useRef(0);
-  const [fsOn,      setFsOn]      = useState(false);
-  const [embedPct,  setEmbedPct]  = useState(0);
-  const [fallbackPct, setFbPct]   = useState(0);
+  const [fsOn,        setFsOn]      = useState(false);
+  const [embedPct,    setEmbedPct]  = useState(0);
+  const [fallbackPct, setFbPct]     = useState(0);
+
+  useBlockDevtoolsKeys(true);
 
   useEffect(() => { onCompleteRef.current = onCanComplete; }, [onCanComplete]);
   useEffect(() => { onProgressRef.current = onProgress; }, [onProgress]);
 
-  // Report on unmount
   useEffect(() => {
     return () => {
       if (lastDurRef.current > 0 && onProgressRef.current) {
@@ -304,9 +345,6 @@ function EmbedPlayer({ url, missionText, docContent, fullView, onCanComplete, on
     onCompleteRef.current?.();
   }
 
-  // Listen for postMessage events from the embed iframe
-  // Bunny Stream sends: { event:'timeupdate', seconds:X, duration:Y }
-  // Vimeo sends:        { event:'timeupdate', data:{ seconds:X, duration:Y } }
   useEffect(() => {
     if (!url) return;
     firedRef.current = false;
@@ -318,16 +356,11 @@ function EmbedPlayer({ url, missionText, docContent, fullView, onCanComplete, on
         const msg = typeof e.data === 'string' ? JSON.parse(e.data) : e.data;
         let cur = 0, dur = 0;
 
-        // Bunny Stream format
         if (msg?.event === 'timeupdate' && typeof msg.seconds === 'number') {
           cur = msg.seconds; dur = msg.duration;
-        }
-        // Vimeo format
-        else if (msg?.event === 'timeupdate' && typeof msg.data?.seconds === 'number') {
+        } else if (msg?.event === 'timeupdate' && typeof msg.data?.seconds === 'number') {
           cur = msg.data.seconds; dur = msg.data.duration;
-        }
-        // Generic: any object with currentTime / duration
-        else if (typeof msg?.currentTime === 'number' && typeof msg?.duration === 'number') {
+        } else if (typeof msg?.currentTime === 'number' && typeof msg?.duration === 'number') {
           cur = msg.currentTime; dur = msg.duration;
         }
 
@@ -347,14 +380,12 @@ function EmbedPlayer({ url, missionText, docContent, fullView, onCanComplete, on
     return () => window.removeEventListener('message', onMessage);
   }, [url]);
 
-  // Fallback timer — only used if no postMessage events arrive after 3 s
-  // Counts wall-clock seconds; assumes roughly 75% of the video = min watch time
   useEffect(() => {
     if (!url) return;
     let count = 0;
-    const FALLBACK_SECS = 90; // unlock after 90 s of page time if no events received
+    const FALLBACK_SECS = 90;
     const id = setInterval(() => {
-      if (gotMsgRef.current) return; // real events are flowing — skip timer
+      if (gotMsgRef.current) return;
       count++;
       const pct = Math.min(100, Math.round((count / FALLBACK_SECS) * 100));
       setFbPct(pct);
@@ -374,7 +405,6 @@ function EmbedPlayer({ url, missionText, docContent, fullView, onCanComplete, on
     else wrapperRef.current?.requestFullscreen?.();
   }
 
-  // Show real pct if we have postMessage data, otherwise show fallback timer pct
   const pct      = gotMsgRef.current ? embedPct : fallbackPct;
   const unlocked = firedRef.current;
 
@@ -382,10 +412,10 @@ function EmbedPlayer({ url, missionText, docContent, fullView, onCanComplete, on
     <div style={{ display:'flex', flexDirection:'column', flex:1, minHeight:0 }}>
       <div
         ref={wrapperRef}
-        onContextMenu={e => e.preventDefault()}
+        onContextMenu={e => { e.preventDefault(); e.stopPropagation(); return false; }}
         style={{
           background:'#000', display:'flex', flexDirection:'column',
-          userSelect:'none',
+          userSelect:'none', WebkitUserSelect:'none',
           ...(fsOn
             ? { position:'fixed', inset:0, zIndex:9999 }
             : fullView
@@ -393,16 +423,24 @@ function EmbedPlayer({ url, missionText, docContent, fullView, onCanComplete, on
               : { flexShrink:0, aspectRatio:'16/9' }),
         }}
       >
-        <div style={{ flex:1, position:'relative', minHeight:0 }}
-          onContextMenu={e => e.preventDefault()}>
+        <div
+          style={{ flex:1, position:'relative', minHeight:0 }}
+          onContextMenu={e => { e.preventDefault(); e.stopPropagation(); return false; }}
+        >
           {url ? (
             <iframe
               ref={iframeRef}
               src={url}
               style={{ width:'100%', height:'100%', border:'none', display:'block' }}
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
+              /*
+                IMPORTANT: Do NOT include "download" in the allow list.
+                Also omit "clipboard-write" unless you need it — the fewer
+                permissions the iframe has, the less the browser exposes natively.
+              */
+              allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture; fullscreen"
               title="Lesson video"
-              onContextMenu={e => e.preventDefault()}
+              /* Prevent the iframe itself from showing a context menu */
+              onContextMenu={e => { e.preventDefault(); e.stopPropagation(); return false; }}
             />
           ) : (
             <div style={{ position:'absolute', inset:0, display:'flex', flexDirection:'column',
@@ -417,12 +455,38 @@ function EmbedPlayer({ url, missionText, docContent, fullView, onCanComplete, on
               </div>
             </div>
           )}
-          {url && <div style={{ position:'absolute', inset:0, zIndex:2, pointerEvents:'none' }} />}
+
+          {/*
+            Full-surface protection overlay.
+            Sits above the iframe — captures right-click before the browser
+            can route it into the iframe's native video context menu
+            ("Save video as", "Copy video URL", "Picture in picture", etc.)
+
+            pointerEvents:'auto' is essential — without it the overlay is
+            invisible to mouse events and the iframe gets them directly.
+
+            We deliberately do NOT block pointer events so play/pause via
+            click-through still works for embeds that support it; we only
+            cancel the context menu.
+          */}
+          {url && (
+            <div
+              style={{
+                position:'absolute', inset:0, zIndex:10,
+                pointerEvents:'auto',
+                cursor:'default',
+                WebkitTouchCallout:'none',
+                userSelect:'none',
+              }}
+              onContextMenu={e => { e.preventDefault(); e.stopPropagation(); return false; }}
+              onDragStart={e => e.preventDefault()}
+            />
+          )}
         </div>
+
         {url && (
           <div style={{ background:'#0D1117', padding:'7px 12px', display:'flex',
-            alignItems:'center', justifyContent:'flex-end', gap:8, zIndex:3, flexShrink:0 }}>
-            {/* Progress badge */}
+            alignItems:'center', justifyContent:'flex-end', gap:8, zIndex:12, flexShrink:0 }}>
             <div style={{
               display:'flex', alignItems:'center', gap:5,
               background: unlocked ? 'rgba(126,217,87,.18)' : 'rgba(255,255,255,.08)',
